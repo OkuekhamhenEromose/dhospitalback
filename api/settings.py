@@ -26,9 +26,8 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'corsheaders',
-    'storages',
     'users.apps.UsersConfig',
-    'hospital.apps.Hospitalconfig'
+    # 'hospital.apps.Hospitalconfig'
 ]
 
 MIDDLEWARE = [
@@ -140,7 +139,7 @@ CORS_ALLOW_METHODS = [
     'PUT',
 ]
 CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', 
-    default='http://localhost:5173,http://localhost:5174,https://splendorous-custard-21ddd9.netlify.app,https://blogbackc.onrender.com',
+    default='http://localhost:5173,http://localhost:5174',#,https://splendorous-custard-21ddd9.netlify.app,https://blogbackc.onrender.com
     cast=Csv()
 )
 
@@ -153,12 +152,12 @@ MEDIA_URL = '/image/'
 MEDIA_ROOT = os.path.join(BASE_DIR,'image')
 
 # email settings
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_USE_TLS = True
-EMAIL_PORT = 587
-EMAIL_HOST_USER = str(os.getenv('EMAIL_HOST_USER'))
-EMAIL_HOST_PASSWORD = str(os.getenv('EMAIL_HOST_PASSWORD'))
+EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
+EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
@@ -167,13 +166,14 @@ REST_FRAMEWORK = {
 }
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=5),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
-    "ROTATE_REFRESH_TOKENS": True,
-    "BLACKLIST_AFTER_ROTATION": True,
-    "ALGORITHM": "HS256",
-    "AUTH_HEADER_TYPES": ("Bearer",),
-
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=24),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'AUTH_HEADER_TYPES': ('Bearer',),
+    'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
+    'USER_ID_FIELD': 'id',
+    'USER_ID_CLAIM': 'user_id',
 }
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
