@@ -1,41 +1,31 @@
-from rest_framework import generics, status
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from .models import Appointment, Vitals, LabResult, MedicalReport
-from .serializers import AppointmentSerializer, VitalsSerializer, LabResultSerializer, MedicalReportSerializer
+from rest_framework import generics, permissions
+from rest_framework.permissions import IsAuthenticated
+from .models import Appointment, Vitals, LabResult, MedicalReport, BlogPost
+from .serializers import AppointmentSerializer, VitalsSerializer, LabResultSerializer, MedicalReportSerializer, BlogPostSerializer
 from .permissions import IsRole
-from users.models import Profile
-from django.shortcuts import get_object_or_404
+from django.db.models import Q
 
-# Patient books an appointment (patient user can create their own appointment)
+# ---------------- Appointment Logic ---------------- #
+
 class AppointmentCreateView(generics.CreateAPIView):
     permission_classes = [IsAuthenticated, IsRole]
-    allowed_roles = ['PATIENT']  # only patient creates their appointment
+    allowed_roles = ['PATIENT']
     serializer_class = AppointmentSerializer
 
-    def get_serializer(self, *args, **kwargs):
-        # set patient queryset
-        kwargs.setdefault('context', self.get_serializer_context())
-        ser = super().get_serializer(*args, **kwargs)
-        return ser
-
     def perform_create(self, serializer):
-        # force the appointment.patient to be the authenticated user's profile
         profile = self.request.user.profile
         serializer.save(patient=profile)
 
-# Nurse posts vitals for an appointment
+
 class VitalsCreateView(generics.CreateAPIView):
     permission_classes = [IsAuthenticated, IsRole]
     allowed_roles = ['NURSE']
     serializer_class = VitalsSerializer
 
     def perform_create(self, serializer):
-        profile = self.request.user.profile
-        # appointment id should be provided in payload
-        serializer.save(nurse=profile)
+        serializer.save(nurse=self.request.user.profile)
 
-# Lab scientist posts lab results
+
 class LabResultCreateView(generics.CreateAPIView):
     permission_classes = [IsAuthenticated, IsRole]
     allowed_roles = ['LAB']
@@ -44,7 +34,7 @@ class LabResultCreateView(generics.CreateAPIView):
     def perform_create(self, serializer):
         serializer.save(lab_scientist=self.request.user.profile)
 
-# Doctor creates final medical report (reads appointment, vitals, lab)
+
 class MedicalReportCreateView(generics.CreateAPIView):
     permission_classes = [IsAuthenticated, IsRole]
     allowed_roles = ['DOCTOR']
@@ -52,12 +42,11 @@ class MedicalReportCreateView(generics.CreateAPIView):
 
     def perform_create(self, serializer):
         serializer.save(doctor=self.request.user.profile)
-        # optionally update appointment status
         appt = serializer.validated_data['appointment']
         appt.status = 'COMPLETED'
         appt.save()
 
-# Doctor/authorized users can list appointments and retrieve a single appointment
+
 class AppointmentListView(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = AppointmentSerializer
@@ -66,14 +55,48 @@ class AppointmentListView(generics.ListAPIView):
         profile = self.request.user.profile
         if profile.role == 'PATIENT':
             return Appointment.objects.filter(patient=profile).order_by('-booked_at')
-        elif profile.role == 'DOCTOR':
-            # show all pending and assigned appointments; tweak as needed
-            return Appointment.objects.all().order_by('-booked_at')
-        else:
-            # nurses and lab can see appointment details to post data
-            return Appointment.objects.all().order_by('-booked_at')
+        return Appointment.objects.all().order_by('-booked_at')
+
 
 class AppointmentDetailView(generics.RetrieveAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = AppointmentSerializer
     queryset = Appointment.objects.all()
+
+
+# ---------------- Blog Logic ---------------- #
+
+class BlogPostListCreateView(generics.ListCreateAPIView):
+    serializer_class = BlogPostSerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        queryset = BlogPost.objects.filter(published=True)
+        search = self.request.query_params.get('search')
+        if search:
+            queryset = queryset.filter(
+                Q(title__icontains=search) |
+                Q(description__icontains=search) |
+                Q(content__icontains=search)
+            )
+        return queryset
+
+    def perform_create(self, serializer):
+        profile = self.request.user.profile
+        if profile.role not in ['ADMIN', 'DOCTOR']:
+            raise permissions.PermissionDenied("Only admins or doctors can create blog posts.")
+        serializer.save(author=profile)
+
+
+class BlogPostDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = BlogPost.objects.all()
+    serializer_class = BlogPostSerializer
+    lookup_field = 'slug'
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+    def perform_update(self, serializer):
+        profile = self.request.user.profile
+        obj = self.get_object()
+        if obj.author != profile and profile.role != 'ADMIN':
+            raise permissions.PermissionDenied("You can only edit your own posts or be an admin.")
+        serializer.save()

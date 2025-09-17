@@ -10,7 +10,6 @@ from .serializers import (
 )
 from .models import Profile
 
-
 class RegistrationView(APIView):
     permission_classes = [permissions.AllowAny]
 
