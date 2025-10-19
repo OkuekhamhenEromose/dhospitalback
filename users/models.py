@@ -11,7 +11,7 @@ ROLE_CHOICES = (
     ('ADMIN', 'Admin'),
 )
 
-GENDER = (
+GENDER_CHOICES = (
     ('M', 'Male'),
     ('F', 'Female'),
     ('O', 'Other'),
@@ -21,7 +21,7 @@ class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     fullname = models.CharField(max_length=255)
     phone = models.CharField(max_length=50, blank=True, null=True)
-    gender = models.CharField(max_length=10, choices=GENDER, blank=True, null=True)
+    gender = models.CharField(max_length=10, choices=GENDER_CHOICES, blank=True, null=True)
     profile_pix = models.ImageField(upload_to='profile', blank=True, null=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='PATIENT')
 

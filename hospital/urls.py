@@ -2,18 +2,26 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
-    # ---------------- Appointments ----------------
+    # Appointments
     path('appointments/', views.AppointmentListView.as_view(), name='appointment-list'),
     path('appointments/create/', views.AppointmentCreateView.as_view(), name='appointment-create'),
     path('appointments/<int:pk>/', views.AppointmentDetailView.as_view(), name='appointment-detail'),
 
-    # ---------------- Vitals ----------------
+    # Test Requests (doctor -> lab)
+    path('test-requests/', views.TestRequestListView.as_view(), name='testrequest-list'),
+    path('test-requests/create/', views.TestRequestCreateView.as_view(), name='testrequest-create'),
+
+    # Vital Requests (doctor -> nurse)
+    path('vital-requests/', views.VitalRequestListView.as_view(), name='vitalrequest-list'),
+    path('vital-requests/create/', views.VitalRequestCreateView.as_view(), name='vitalrequest-create'),
+
+    # Nurse posts vitals
     path('vitals/create/', views.VitalsCreateView.as_view(), name='vitals-create'),
 
-    # ---------------- Lab Results ----------------
+    # Lab posts results
     path('lab-results/create/', views.LabResultCreateView.as_view(), name='labresult-create'),
 
-    # ---------------- Medical Reports ----------------
+    # Doctor posts final report
     path('medical-reports/create/', views.MedicalReportCreateView.as_view(), name='medicalreport-create'),
 
     # ---------------- Blog ----------------
