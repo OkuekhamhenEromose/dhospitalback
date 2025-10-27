@@ -267,3 +267,20 @@ class UpdateProfileView(APIView):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST
+
+
+# ASSIGN DOCTOR RANDOMLY NOT UPON CREATION
+
+# hospital/views.py - Update AppointmentCreateView
+class AppointmentCreateView(generics.CreateAPIView):
+    permission_classes = [permissions.IsAuthenticated, IsRole]
+    allowed_roles = ['PATIENT']
+    serializer_class = AppointmentSerializer
+
+    def perform_create(self, serializer):
+        profile = self.request.user.profile
+        appointment = serializer.save(patient=profile)
+        
+        print(f"Appointment created for patient: {profile.user.username}")
+        print(f"Appointment data: {serializer.data}")
+        print(f"Assigned doctor: {appointment.doctor}")

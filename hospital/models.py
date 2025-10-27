@@ -19,6 +19,14 @@ REQUEST_STATUS = (
     ('CANCELLED', 'Cancelled'),
 )
 
+# hospital/models.py
+from django.db import models
+from django.utils import timezone
+from users.models import Profile
+import random
+
+# ... your existing choices and models ...
+
 class Appointment(models.Model):
     patient = models.ForeignKey(Profile, on_delete=models.CASCADE, related_name='appointments')
     name = models.CharField(max_length=255)
@@ -33,7 +41,30 @@ class Appointment(models.Model):
     def __str__(self):
         return f"Appointment {self.id} - {self.name}"
 
+    def assign_doctor(self):
+        """Automatically assign an available doctor to this appointment"""
+        if self.doctor:
+            return  # Already assigned
+            
+        # Get all available doctors
+        available_doctors = Profile.objects.filter(role='DOCTOR', user__is_active=True)
+        
+        if available_doctors.exists():
+            # Assign a random doctor (you can modify this logic for load balancing)
+            assigned_doctor = random.choice(list(available_doctors))
+            self.doctor = assigned_doctor
+            self.save()
+            print(f"Assigned doctor {assigned_doctor.fullname} to appointment {self.id}")
 
+    def save(self, *args, **kwargs):
+        # Call assign_doctor after saving if no doctor is assigned
+        is_new = self.pk is None
+        super().save(*args, **kwargs)
+        
+        if is_new and not self.doctor:
+            self.assign_doctor()
+
+            
 class TestRequest(models.Model):
     """Created by doctor, assigned to a lab scientist (or left unassigned)."""
     appointment = models.ForeignKey(Appointment, on_delete=models.CASCADE, related_name='test_requests')

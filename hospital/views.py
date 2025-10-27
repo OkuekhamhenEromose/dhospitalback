@@ -3,6 +3,8 @@ from rest_framework.response import Response
 from .models import (
     Appointment, TestRequest, VitalRequest, Vitals, LabResult, MedicalReport, BlogPost
 )
+import random
+from users.models import Profile
 from django.db import models
 from .serializers import (
     AppointmentSerializer, TestRequestSerializer, VitalRequestSerializer,
@@ -13,8 +15,7 @@ from .permissions import IsRole
 from django.shortcuts import get_object_or_404
 
 # --------------- Appointment ---------------
-
-# hospital/views.py - Update AppointmentCreateView
+# hospital/views.py
 class AppointmentCreateView(generics.CreateAPIView):
     permission_classes = [permissions.IsAuthenticated, IsRole]
     allowed_roles = ['PATIENT']
@@ -22,13 +23,21 @@ class AppointmentCreateView(generics.CreateAPIView):
 
     def perform_create(self, serializer):
         profile = self.request.user.profile
-        # Ensure the patient field is set to the current user's profile
-        serializer.save(patient=profile)
         
-        # Debug logging
+        # Get available doctors and assign one randomly
+        available_doctors = Profile.objects.filter(role='DOCTOR', user__is_active=True)
+        assigned_doctor = None
+        
+        if available_doctors.exists():
+            assigned_doctor = random.choice(list(available_doctors))
+        
+        appointment = serializer.save(patient=profile, doctor=assigned_doctor)
+        
         print(f"Appointment created for patient: {profile.user.username}")
+        print(f"Assigned doctor: {assigned_doctor}")
         print(f"Appointment data: {serializer.data}")
 
+# hospital/views.py
 class AppointmentListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = AppointmentSerializer
@@ -38,11 +47,13 @@ class AppointmentListView(generics.ListAPIView):
         if profile.role == 'PATIENT':
             return Appointment.objects.filter(patient=profile).order_by('-booked_at')
         if profile.role == 'DOCTOR':
-            # doctor sees appointments assigned to them or all PENDING/IN_REVIEW
-            return Appointment.objects.filter(doctor=profile).order_by('-booked_at')
+            # Doctor sees appointments assigned to them OR pending appointments that need assignment
+            return Appointment.objects.filter(
+                models.Q(doctor=profile) | 
+                models.Q(doctor__isnull=True, status='PENDING')
+            ).order_by('-booked_at')
         # staff/admin/lab/nurse see all for now
         return Appointment.objects.all().order_by('-booked_at')
-
 
 class AppointmentDetailView(generics.RetrieveAPIView):
     permission_classes = [permissions.IsAuthenticated]
