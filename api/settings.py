@@ -115,16 +115,6 @@ CORS_ALLOW_ALL_ORIGINS = config('CORS_ALLOW_ALL_ORIGINS', default=DEBUG, cast=bo
 CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:5173,http://localhost:3000', cast=Csv())
 CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', default='http://localhost:5173,http://localhost:5174', cast=Csv())
 CORS_ALLOW_CREDENTIALS = True
-# CORS_ALLOWED_ORIGIN_REGEXES = [
-#     r"^http://localhost:\d+$",
-#     r"^https://.*\.netlify\.app$",
-#     r"^https://.*\.netlify\.com$",
-# ]
-# CORS_ALLOW_HEADERS = [
-#     'accept','accept-encoding','authorization','content-type','dnt','origin',
-#     'user-agent','x-csrftoken','x-requested-with',
-# ]
-# CORS_ALLOW_METHODS = ['DELETE','GET','OPTIONS','PATCH','POST','PUT']
 
 # Static / Media
 STATIC_URL = 'static/'

@@ -23,6 +23,7 @@ urlpatterns = [
 
     # Doctor posts final report
     path('medical-reports/create/', views.MedicalReportCreateView.as_view(), name='medicalreport-create'),
+    path('staff/', views.StaffListView.as_view(), name='staff-list'),
 
     # ---------------- Blog ----------------
     path('blog/', views.BlogPostListCreateView.as_view(), name='blog-list-create'),

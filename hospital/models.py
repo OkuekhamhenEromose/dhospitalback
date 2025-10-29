@@ -1,6 +1,8 @@
+# hospital/models.py
 from django.db import models
 from django.utils import timezone
 from users.models import Profile
+import random
 
 SEX_CHOICES = (('M', 'Male'), ('F', 'Female'), ('O', 'Other'))
 
@@ -18,14 +20,6 @@ REQUEST_STATUS = (
     ('DONE', 'Done'),
     ('CANCELLED', 'Cancelled'),
 )
-
-# hospital/models.py
-from django.db import models
-from django.utils import timezone
-from users.models import Profile
-import random
-
-# ... your existing choices and models ...
 
 class Appointment(models.Model):
     patient = models.ForeignKey(Profile, on_delete=models.CASCADE, related_name='appointments')
@@ -76,6 +70,40 @@ class TestRequest(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    def assign_lab_scientist(self):
+        """Automatically assign an available lab scientist to this test request"""
+        if self.assigned_to:
+            return  # Already assigned
+            
+        # Get all available lab scientists
+        available_lab_scientists = Profile.objects.filter(role='LAB', user__is_active=True)
+        
+        if available_lab_scientists.exists():
+            # Assign a random lab scientist
+            assigned_scientist = random.choice(list(available_lab_scientists))
+            self.assigned_to = assigned_scientist
+            self.save()
+            print(f"Assigned lab scientist {assigned_scientist.fullname} to test request {self.id}")
+
+    def save(self, *args, **kwargs):
+        is_new = self.pk is None
+        super().save(*args, **kwargs)
+        
+        if is_new and not self.assigned_to:
+            self.assign_lab_scientist()
+
+         # Update appointment status when test request is completed
+        if not is_new and self.status == 'DONE':
+            # Check if we have both vitals and test results
+            appointment = self.appointment
+            has_vitals = appointment.vital_requests.filter(status='DONE').exists()
+            has_all_tests = appointment.test_requests.filter(status='PENDING').exists()
+            
+            if has_vitals and not has_all_tests:
+                # Both vitals and tests are done, ready for doctor review
+                appointment.status = 'IN_REVIEW'
+                appointment.save()
+
 
 class VitalRequest(models.Model):
     """Created by doctor, assigned to a nurse (or left unassigned)."""
@@ -86,6 +114,37 @@ class VitalRequest(models.Model):
     status = models.CharField(max_length=20, choices=REQUEST_STATUS, default='PENDING')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def assign_nurse(self):
+        """Automatically assign an available nurse to this vital request"""
+        if self.assigned_to:
+            return  # Already assigned
+            
+        # Get all available nurses
+        available_nurses = Profile.objects.filter(role='NURSE', user__is_active=True)
+        
+        if available_nurses.exists():
+            # Assign a random nurse
+            assigned_nurse = random.choice(list(available_nurses))
+            self.assigned_to = assigned_nurse
+            self.save()
+            print(f"Assigned nurse {assigned_nurse.fullname} to vital request {self.id}")
+
+    def save(self, *args, **kwargs):
+        is_new = self.pk is None
+        super().save(*args, **kwargs)
+        
+        if is_new and not self.assigned_to:
+            self.assign_nurse()
+
+         # Update appointment status when vital request is completed
+        if not is_new and self.status == 'DONE':
+            appointment = self.appointment
+            # If tests are also done, mark as in review
+            pending_tests = appointment.test_requests.filter(status='PENDING').exists()
+            if not pending_tests:
+                appointment.status = 'IN_REVIEW'
+                appointment.save()
 
 class Vitals(models.Model):
     vital_request = models.ForeignKey(

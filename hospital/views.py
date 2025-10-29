@@ -13,6 +13,8 @@ from .serializers import (
 from rest_framework.exceptions import PermissionDenied
 from .permissions import IsRole
 from django.shortcuts import get_object_or_404
+from django.db.models import Q
+from users.serializers import ProfileSerializer
 
 # --------------- Appointment ---------------
 # hospital/views.py
@@ -38,6 +40,7 @@ class AppointmentCreateView(generics.CreateAPIView):
         print(f"Appointment data: {serializer.data}")
 
 # hospital/views.py
+# hospital/views.py - Update AppointmentListView for doctors
 class AppointmentListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = AppointmentSerializer
@@ -47,11 +50,8 @@ class AppointmentListView(generics.ListAPIView):
         if profile.role == 'PATIENT':
             return Appointment.objects.filter(patient=profile).order_by('-booked_at')
         if profile.role == 'DOCTOR':
-            # Doctor sees appointments assigned to them OR pending appointments that need assignment
-            return Appointment.objects.filter(
-                models.Q(doctor=profile) | 
-                models.Q(doctor__isnull=True, status='PENDING')
-            ).order_by('-booked_at')
+            # Doctor sees appointments assigned to them
+            return Appointment.objects.filter(doctor=profile).order_by('-booked_at')
         # staff/admin/lab/nurse see all for now
         return Appointment.objects.all().order_by('-booked_at')
 
@@ -69,12 +69,16 @@ class TestRequestCreateView(generics.CreateAPIView):
     serializer_class = TestRequestSerializer
 
     def perform_create(self, serializer):
-        # doctor creates request
-        serializer.save(requested_by=self.request.user.profile)
-        # Optionally, mark appointment as awaiting results
-        appt = serializer.validated_data['appointment']
+        # Create the test request
+        test_request = serializer.save(requested_by=self.request.user.profile)
+        
+        # Mark appointment as awaiting results
+        appt = test_request.appointment
         appt.status = 'AWAITING_RESULTS'
         appt.save()
+        
+        print(f"Test request created by doctor {self.request.user.profile.fullname}")
+        print(f"Assigned to lab scientist: {test_request.assigned_to}")
 
 
 class TestRequestListView(generics.ListAPIView):
@@ -90,7 +94,6 @@ class TestRequestListView(generics.ListAPIView):
             return TestRequest.objects.filter(requested_by=profile).order_by('-created_at')
         return TestRequest.objects.all().order_by('-created_at')
 
-
 # --------------- VitalRequest (doctor -> nurse) ---------------
 
 class VitalRequestCreateView(generics.CreateAPIView):
@@ -99,10 +102,16 @@ class VitalRequestCreateView(generics.CreateAPIView):
     serializer_class = VitalRequestSerializer
 
     def perform_create(self, serializer):
-        serializer.save(requested_by=self.request.user.profile)
-        appt = serializer.validated_data['appointment']
+        # Create the vital request
+        vital_request = serializer.save(requested_by=self.request.user.profile)
+        
+        # Mark appointment as in review
+        appt = vital_request.appointment
         appt.status = 'IN_REVIEW'
         appt.save()
+        
+        print(f"Vital request created by doctor {self.request.user.profile.fullname}")
+        print(f"Assigned to nurse: {vital_request.assigned_to}")
 
 
 class VitalRequestListView(generics.ListAPIView):
@@ -119,18 +128,22 @@ class VitalRequestListView(generics.ListAPIView):
 
 
 # --------------- Nurse fills Vitals ---------------
-
 class VitalsCreateView(generics.CreateAPIView):
     permission_classes = [permissions.IsAuthenticated, IsRole]
     allowed_roles = ['NURSE']
     serializer_class = VitalsSerializer
 
     def perform_create(self, serializer):
-        serializer.save(nurse=self.request.user.profile)
-        # mark associated VitalRequest as done
-        vital_request = serializer.validated_data['vital_request']
+        vitals = serializer.save(nurse=self.request.user.profile)
+        vital_request = vitals.vital_request
+        
+        # Mark vital request as done
         vital_request.status = 'DONE'
         vital_request.save()
+        
+        appointment = vital_request.appointment
+        print(f"Vitals recorded for {appointment.name}")
+        print(f"BP: {vitals.blood_pressure}, Pulse: {vitals.pulse_rate}")
 
 
 # --------------- Lab scientist fills LabResult ---------------
@@ -141,13 +154,24 @@ class LabResultCreateView(generics.CreateAPIView):
     serializer_class = LabResultSerializer
 
     def perform_create(self, serializer):
-        serializer.save(lab_scientist=self.request.user.profile)
-        test_request = serializer.validated_data['test_request']
-        # optionally set test_request to IN_PROGRESS or DONE if all tests submitted
-        # For simplicity, set it to DONE when a labresult is posted (consider multi-test flows later)
-        test_request.status = 'DONE'
-        test_request.save()
-
+        lab_result = serializer.save(lab_scientist=self.request.user.profile)
+        test_request = lab_result.test_request
+        
+        # Update appointment status when results are submitted
+        appointment = test_request.appointment
+        
+        print(f"Lab result submitted for {appointment.name}")
+        print(f"Test: {lab_result.test_name}, Result: {lab_result.result}")
+        
+        # Check if all requested tests have results
+        requested_tests = [test.strip() for test in test_request.tests.split(',')]
+        completed_tests = test_request.lab_results.values_list('test_name', flat=True)
+        
+        # If all tests have results, mark test request as done
+        if set(requested_tests).issubset(set(completed_tests)):
+            test_request.status = 'DONE'
+            test_request.save()
+            print(f"All tests completed for {appointment.name}")
 
 # --------------- Doctor creates Medical Report ---------------
 
@@ -159,6 +183,17 @@ class MedicalReportCreateView(generics.CreateAPIView):
     def perform_create(self, serializer):
         serializer.save(doctor=self.request.user.profile)
         # Appointment status updated in MedicalReport.save()
+
+
+class StaffListView(generics.ListAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ProfileSerializer  # You'll need to create this or use existing one
+
+    def get_queryset(self):
+        # Return all staff members (doctors, nurses, lab scientists)
+        return Profile.objects.filter(
+            Q(role='DOCTOR') | Q(role='NURSE') | Q(role='LAB')
+        ).filter(user__is_active=True)
 
 # ---------------- Blog: Only Admin can Create / Update / Delete ---------------- #
 class BlogPostListCreateView(generics.ListCreateAPIView):
