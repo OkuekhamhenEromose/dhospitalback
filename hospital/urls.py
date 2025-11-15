@@ -1,3 +1,4 @@
+# hospital/urls.py
 from django.urls import path
 from . import views
 
@@ -25,7 +26,15 @@ urlpatterns = [
     path('medical-reports/create/', views.MedicalReportCreateView.as_view(), name='medicalreport-create'),
     path('staff/', views.StaffListView.as_view(), name='staff-list'),
 
-    # ---------------- Blog ----------------
+    # ---------------- Enhanced Blog URLs ----------------
+    # Public blog endpoints
     path('blog/', views.BlogPostListCreateView.as_view(), name='blog-list-create'),
+    path('blog/search/', views.BlogPostSearchView.as_view(), name='blog-search'),
+    path('blog/latest/', views.BlogPostLatestView.as_view(), name='blog-latest'),
+    path('blog/author/<int:author_id>/', views.BlogPostByAuthorView.as_view(), name='blog-by-author'),
     path('blog/<slug:slug>/', views.BlogPostDetailView.as_view(), name='blog-detail'),
+    
+    # Admin-only blog endpoints
+    path('blog/admin/all/', views.AdminBlogPostListView.as_view(), name='blog-admin-all'),
+    path('blog/admin/stats/', views.BlogStatsView.as_view(), name='blog-stats'),
 ]

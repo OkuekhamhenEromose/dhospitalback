@@ -36,6 +36,36 @@ class VitalsAdmin(admin.ModelAdmin):
 # ---------------- BlogPostAdmin ----------------
 @admin.register(BlogPost)
 class BlogPostAdmin(admin.ModelAdmin):
-    list_display = ('title', 'author', 'published', 'published_date', 'created_at')
-    list_filter = ('published', 'author')
+    list_display = ('title', 'author', 'published', 'has_toc', 'published_date', 'created_at')
+    list_filter = ('published', 'author', 'enable_toc')
     search_fields = ('title', 'content', 'author__fullname')
+    readonly_fields = ('table_of_contents_preview',)
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('title', 'slug', 'description', 'content', 'author', 'featured_image')
+        }),
+        ('Publication', {
+            'fields': ('published', 'published_date')
+        }),
+        ('Table of Contents', {
+            'fields': ('enable_toc', 'table_of_contents_preview', 'table_of_contents')
+        }),
+    )
+
+    def has_toc(self, obj):
+        return bool(obj.table_of_contents)
+    has_toc.boolean = True
+    has_toc.short_description = 'Has TOC'
+
+    def table_of_contents_preview(self, obj):
+        if obj.table_of_contents:
+            toc_html = "<ul style='margin-left: 20px;'>"
+            for item in obj.table_of_contents[:5]:  # Show first 5 items
+                toc_html += f"<li>Level {item['level']}: {item['title']}</li>"
+            toc_html += "</ul>"
+            if len(obj.table_of_contents) > 5:
+                toc_html += f"<p>... and {len(obj.table_of_contents) - 5} more items</p>"
+            return toc_html
+        return "No table of contents generated"
+    table_of_contents_preview.short_description = 'TOC Preview'
+    table_of_contents_preview.allow_tags = True

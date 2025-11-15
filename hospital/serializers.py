@@ -106,16 +106,64 @@ class AppointmentSerializer(serializers.ModelSerializer):
             ).data
         
         return rep
-# ---------------- Blog Serializers ---------------- #
+
+# ---------------- Enhanced Blog Serializers ---------------- #
+
+class BlogPostListSerializer(serializers.ModelSerializer):
+    author = ProfileSerializer(read_only=True)
+    has_toc = serializers.SerializerMethodField()
+    toc_items_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = BlogPost
+        fields = [
+            'id', 'title', 'description', 'author', 'featured_image',
+            'published', 'published_date', 'created_at', 'slug', 
+            'enable_toc', 'has_toc', 'toc_items_count'
+        ]
+        read_only_fields = ['author', 'published_date', 'created_at', 'updated_at', 'slug']
+
+    def get_has_toc(self, obj):
+        return obj.enable_toc and bool(obj.table_of_contents)
+
+    def get_toc_items_count(self, obj):
+        return len(obj.table_of_contents) if obj.table_of_contents else 0
+
 
 class BlogPostSerializer(serializers.ModelSerializer):
     author = ProfileSerializer(read_only=True)
+    table_of_contents = serializers.SerializerMethodField()
+    toc_display = serializers.SerializerMethodField()
 
     class Meta:
         model = BlogPost
         fields = [
             'id', 'title', 'description', 'content', 'author',
             'featured_image', 'published', 'published_date',
-            'created_at', 'updated_at', 'slug'
+            'created_at', 'updated_at', 'slug', 'enable_toc',
+            'table_of_contents', 'toc_display'
         ]
-        read_only_fields = ['author', 'published_date', 'created_at', 'updated_at', 'slug']
+        read_only_fields = ['author', 'published_date', 'created_at', 'updated_at', 'slug', 'table_of_contents']
+
+    def get_table_of_contents(self, obj):
+        return obj.table_of_contents
+
+    def get_toc_display(self, obj):
+        return obj.get_toc_display()
+
+
+class BlogPostCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BlogPost
+        fields = [
+            'id', 'title', 'description', 'content', 'featured_image',
+            'published', 'enable_toc'
+        ]
+
+    def create(self, validated_data):
+        # TOC will be auto-generated in the model's save method
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        # TOC will be auto-generated in the model's save method
+        return super().update(instance, validated_data)

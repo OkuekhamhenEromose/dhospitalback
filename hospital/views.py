@@ -1,5 +1,8 @@
+# hospital/views.py
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
+from rest_framework.decorators import action
+from rest_framework.views import APIView
 from .models import (
     Appointment, TestRequest, VitalRequest, Vitals, LabResult, MedicalReport, BlogPost
 )
@@ -8,7 +11,8 @@ from users.models import Profile
 from django.db import models
 from .serializers import (
     AppointmentSerializer, TestRequestSerializer, VitalRequestSerializer,
-    VitalsSerializer, LabResultSerializer, MedicalReportSerializer, BlogPostSerializer
+    VitalsSerializer, LabResultSerializer, MedicalReportSerializer, 
+    BlogPostSerializer, BlogPostCreateSerializer, BlogPostListSerializer
 )
 from rest_framework.exceptions import PermissionDenied
 from .permissions import IsRole
@@ -17,7 +21,6 @@ from django.db.models import Q
 from users.serializers import ProfileSerializer
 
 # --------------- Appointment ---------------
-# hospital/views.py
 class AppointmentCreateView(generics.CreateAPIView):
     permission_classes = [permissions.IsAuthenticated, IsRole]
     allowed_roles = ['PATIENT']
@@ -39,8 +42,6 @@ class AppointmentCreateView(generics.CreateAPIView):
         print(f"Assigned doctor: {assigned_doctor}")
         print(f"Appointment data: {serializer.data}")
 
-# hospital/views.py
-# hospital/views.py - Update AppointmentListView for doctors
 class AppointmentListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = AppointmentSerializer
@@ -187,7 +188,7 @@ class MedicalReportCreateView(generics.CreateAPIView):
 
 class StaffListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
-    serializer_class = ProfileSerializer  # You'll need to create this or use existing one
+    serializer_class = ProfileSerializer
 
     def get_queryset(self):
         # Return all staff members (doctors, nurses, lab scientists)
@@ -195,14 +196,21 @@ class StaffListView(generics.ListAPIView):
             Q(role='DOCTOR') | Q(role='NURSE') | Q(role='LAB')
         ).filter(user__is_active=True)
 
-# ---------------- Blog: Only Admin can Create / Update / Delete ---------------- #
+# ---------------- Enhanced Blog Views with TOC ---------------- #
 class BlogPostListCreateView(generics.ListCreateAPIView):
     """
-    - Anyone (authenticated or not) can view blog posts.
-    - Only authenticated users with ADMIN role can create blog posts.
+    - Anyone can view published blog posts
+    - Only ADMIN role can create blog posts
     """
-    queryset = BlogPost.objects.all().order_by('-created_at')
-    serializer_class = BlogPostSerializer
+    serializer_class = BlogPostListSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        # If user is authenticated admin, show all posts
+        if user.is_authenticated and hasattr(user, 'profile') and user.profile.role == 'ADMIN':
+            return BlogPost.objects.all().order_by('-created_at')
+        # Public users can only see published posts
+        return BlogPost.objects.filter(published=True).order_by('-created_at')
 
     def get_permissions(self):
         if self.request.method == 'POST':
@@ -210,6 +218,11 @@ class BlogPostListCreateView(generics.ListCreateAPIView):
         return [permissions.AllowAny()]
 
     allowed_roles = ['ADMIN']
+
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return BlogPostCreateSerializer
+        return BlogPostListSerializer
 
     def perform_create(self, serializer):
         profile = self.request.user.profile
@@ -220,11 +233,10 @@ class BlogPostListCreateView(generics.ListCreateAPIView):
 
 class BlogPostDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
-    - Anyone can view a blog post.
-    - Only admins can update or delete.
+    - Anyone can view a blog post
+    - Only admins can update or delete
     """
     queryset = BlogPost.objects.all()
-    serializer_class = BlogPostSerializer
     lookup_field = 'slug'
 
     def get_permissions(self):
@@ -233,6 +245,11 @@ class BlogPostDetailView(generics.RetrieveUpdateDestroyAPIView):
         return [permissions.AllowAny()]
 
     allowed_roles = ['ADMIN']
+
+    def get_serializer_class(self):
+        if self.request.method in ['PUT', 'PATCH']:
+            return BlogPostCreateSerializer
+        return BlogPostSerializer
 
     def perform_update(self, serializer):
         profile = self.request.user.profile
@@ -245,3 +262,83 @@ class BlogPostDetailView(generics.RetrieveUpdateDestroyAPIView):
         if profile.role != 'ADMIN':
             raise PermissionDenied("Only admins can delete blog posts.")
         instance.delete()
+
+
+class BlogPostSearchView(generics.ListAPIView):
+    """
+    Public search for blog posts
+    """
+    serializer_class = BlogPostListSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def get_queryset(self):
+        queryset = BlogPost.objects.filter(published=True)
+        search_query = self.request.query_params.get('q', None)
+        if search_query:
+            queryset = queryset.filter(
+                Q(title__icontains=search_query) |
+                Q(description__icontains=search_query) |
+                Q(content__icontains=search_query)
+            )
+        return queryset.order_by('-created_at')
+
+
+class AdminBlogPostListView(generics.ListAPIView):
+    """
+    Admin-only view to see all posts (including unpublished)
+    """
+    serializer_class = BlogPostListSerializer
+    permission_classes = [permissions.IsAuthenticated, IsRole]
+    allowed_roles = ['ADMIN']
+    
+    def get_queryset(self):
+        return BlogPost.objects.all().order_by('-created_at')
+
+
+class BlogPostLatestView(generics.ListAPIView):
+    """
+    Get latest published blog posts
+    """
+    serializer_class = BlogPostListSerializer
+    permission_classes = [permissions.AllowAny]
+    
+    def get_queryset(self):
+        limit = self.request.query_params.get('limit', 6)
+        return BlogPost.objects.filter(published=True).order_by('-published_date', '-created_at')[:int(limit)]
+
+
+class BlogPostByAuthorView(generics.ListAPIView):
+    """
+    Get blog posts by specific author
+    """
+    serializer_class = BlogPostListSerializer
+    permission_classes = [permissions.AllowAny]
+    
+    def get_queryset(self):
+        author_id = self.kwargs['author_id']
+        return BlogPost.objects.filter(
+            author_id=author_id, 
+            published=True
+        ).order_by('-published_date', '-created_at')
+
+
+class BlogStatsView(APIView):
+    """
+    Get blog statistics (admin only)
+    """
+    permission_classes = [permissions.IsAuthenticated, IsRole]
+    allowed_roles = ['ADMIN']
+    
+    def get(self, request):
+        total_posts = BlogPost.objects.count()
+        published_posts = BlogPost.objects.filter(published=True).count()
+        draft_posts = total_posts - published_posts
+        posts_with_toc = BlogPost.objects.filter(enable_toc=True).count()
+        
+        return Response({
+            'total_posts': total_posts,
+            'published_posts': published_posts,
+            'draft_posts': draft_posts,
+            'posts_with_toc': posts_with_toc,
+            'toc_usage_rate': (posts_with_toc / total_posts * 100) if total_posts > 0 else 0
+        })

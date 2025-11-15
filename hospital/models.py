@@ -3,6 +3,8 @@ from django.db import models
 from django.utils import timezone
 from users.models import Profile
 import random
+import json
+from django.utils.text import slugify
 
 SEX_CHOICES = (('M', 'Male'), ('F', 'Female'), ('O', 'Other'))
 
@@ -57,8 +59,7 @@ class Appointment(models.Model):
         
         if is_new and not self.doctor:
             self.assign_doctor()
-
-            
+          
 class TestRequest(models.Model):
     """Created by doctor, assigned to a lab scientist (or left unassigned)."""
     appointment = models.ForeignKey(Appointment, on_delete=models.CASCADE, related_name='test_requests')
@@ -202,6 +203,10 @@ class BlogPost(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     slug = models.SlugField(max_length=200, unique=True, blank=True)
+    
+    # New fields for TOC
+    table_of_contents = models.JSONField(default=list, blank=True, help_text="Auto-generated table of contents")
+    enable_toc = models.BooleanField(default=True, help_text="Enable table of contents for this post")
 
     class Meta:
         ordering = ['-published_date', '-created_at']
@@ -213,6 +218,49 @@ class BlogPost(models.Model):
         if self.published and not self.published_date:
             self.published_date = timezone.now()
         if not self.slug:
-            from django.utils.text import slugify
             self.slug = slugify(self.title)
+        
+        # Auto-generate TOC if enabled
+        if self.enable_toc and self.content:
+            self.generate_table_of_contents()
+        
         super().save(*args, **kwargs)
+
+    def generate_table_of_contents(self):
+        """Auto-generate TOC from heading tags in content"""
+        import re
+        
+        # Find headings (h1-h6) in content
+        heading_pattern = r'<h([1-6])[^>]*>(.*?)</h\1>'
+        headings = re.findall(heading_pattern, self.content)
+        
+        toc_items = []
+        for level, title_html in headings:
+            # Clean HTML tags from title
+            clean_title = re.sub(r'<[^>]+>', '', title_html).strip()
+            if clean_title:
+                anchor = slugify(clean_title)
+                toc_items.append({
+                    'title': clean_title,
+                    'level': int(level),
+                    'anchor': anchor,
+                    'id': len(toc_items) + 1
+                })
+        
+        self.table_of_contents = toc_items
+
+    def get_toc_display(self):
+        """Format TOC for display with proper indentation"""
+        if not self.table_of_contents:
+            return []
+        
+        formatted_toc = []
+        for item in self.table_of_contents:
+            level = item['level']
+            indent = "  " * (level - 1)  # Indentation based on heading level
+            formatted_toc.append({
+                **item,
+                'display_title': f"{indent}{item['id']}. {item['title']}"
+            })
+        
+        return formatted_toc
