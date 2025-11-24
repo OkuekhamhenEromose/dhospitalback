@@ -19,6 +19,8 @@ from .permissions import IsRole
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
 from users.serializers import ProfileSerializer
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework import status
 
 # --------------- Appointment ---------------
 class AppointmentCreateView(generics.CreateAPIView):
@@ -203,6 +205,7 @@ class BlogPostListCreateView(generics.ListCreateAPIView):
     - Only ADMIN role can create blog posts
     """
     serializer_class = BlogPostListSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]  # Add support for FormData
 
     def get_queryset(self):
         user = self.request.user
@@ -230,6 +233,25 @@ class BlogPostListCreateView(generics.ListCreateAPIView):
             raise PermissionDenied("Only admins can create blog posts.")
         serializer.save(author=profile)
 
+    def create(self, request, *args, **kwargs):
+        try:
+            # Handle FormData properly
+            if request.content_type == 'multipart/form-data':
+                # For FormData, use the appropriate serializer
+                serializer = self.get_serializer(data=request.data)
+                serializer.is_valid(raise_exception=True)
+                self.perform_create(serializer)
+                headers = self.get_success_headers(serializer.data)
+                return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+            else:
+                # For JSON data, use the normal flow
+                return super().create(request, *args, **kwargs)
+        except Exception as e:
+            print(f"Error creating blog post: {str(e)}")
+            return Response(
+                {"error": "Failed to create blog post", "details": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 class BlogPostDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
@@ -238,6 +260,7 @@ class BlogPostDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
     queryset = BlogPost.objects.all()
     lookup_field = 'slug'
+    parser_classes = [MultiPartParser, FormParser, JSONParser]  # Add support for FormData
 
     def get_permissions(self):
         if self.request.method in ['PUT', 'PATCH', 'DELETE']:
@@ -262,6 +285,26 @@ class BlogPostDetailView(generics.RetrieveUpdateDestroyAPIView):
         if profile.role != 'ADMIN':
             raise PermissionDenied("Only admins can delete blog posts.")
         instance.delete()
+
+    def update(self, request, *args, **kwargs):
+        try:
+            # Handle FormData properly for updates
+            if request.content_type == 'multipart/form-data':
+                partial = kwargs.pop('partial', False)
+                instance = self.get_object()
+                serializer = self.get_serializer(instance, data=request.data, partial=partial)
+                serializer.is_valid(raise_exception=True)
+                self.perform_update(serializer)
+                return Response(serializer.data)
+            else:
+                # For JSON data, use the normal flow
+                return super().update(request, *args, **kwargs)
+        except Exception as e:
+            print(f"Error updating blog post: {str(e)}")
+            return Response(
+                {"error": "Failed to update blog post", "details": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 
 class BlogPostSearchView(generics.ListAPIView):
@@ -304,7 +347,16 @@ class BlogPostLatestView(generics.ListAPIView):
     
     def get_queryset(self):
         limit = self.request.query_params.get('limit', 6)
-        return BlogPost.objects.filter(published=True).order_by('-published_date', '-created_at')[:int(limit)]
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError):
+            limit = 6
+            
+        # Only return published posts, ordered by published_date or created_at
+        # Use distinct to avoid duplicates
+        return BlogPost.objects.filter(
+            published=True
+        ).order_by('-published_date', '-created_at').distinct()[:limit]
 
 
 class BlogPostByAuthorView(generics.ListAPIView):

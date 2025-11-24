@@ -191,8 +191,120 @@ class MedicalReport(models.Model):
         appt.save()
 
 # ---------------- Blog Section ---------------- #
-
+# hospital/models.py - Update BlogPost model
 class BlogPost(models.Model):
+    title = models.CharField(max_length=200)
+    description = models.TextField()  # short intro
+    content = models.TextField()      # full article
+    author = models.ForeignKey(Profile, on_delete=models.CASCADE, related_name='blog_posts')
+    featured_image = models.ImageField(upload_to='blog_images/', null=True, blank=True)
+    # Add additional images
+    image_1 = models.ImageField(upload_to='blog_images/', null=True, blank=True, help_text="Second image for the post")
+    image_2 = models.ImageField(upload_to='blog_images/', null=True, blank=True, help_text="Third image for the post")
+    published = models.BooleanField(default=False)
+    published_date = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    slug = models.SlugField(max_length=200, unique=True, blank=True)
+    
+    # Enhanced TOC fields
+    table_of_contents = models.JSONField(default=list, blank=True, help_text="Auto-generated table of contents")
+    enable_toc = models.BooleanField(default=True, help_text="Enable table of contents for this post")
+    
+    # New fields for structured content
+    subheadings = models.JSONField(default=list, blank=True, help_text="Structured subheadings with descriptions")
+    
+    class Meta:
+        ordering = ['-published_date', '-created_at']
+
+    def __str__(self):
+        return self.title
+
+    def save(self, *args, **kwargs):
+        if self.published and not self.published_date:
+            self.published_date = timezone.now()
+        if not self.slug:
+            self.slug = slugify(self.title)
+        
+        # Auto-generate TOC if enabled
+        if self.enable_toc and self.content:
+            self.generate_table_of_contents()
+        
+        # Auto-extract subheadings if content exists
+        if self.content:
+            self.extract_subheadings()
+        
+        super().save(*args, **kwargs)
+
+    def generate_table_of_contents(self):
+        """Auto-generate TOC from heading tags in content"""
+        import re
+        
+        # Find headings (h1-h6) in content
+        heading_pattern = r'<h([1-6])[^>]*>(.*?)</h\1>'
+        headings = re.findall(heading_pattern, self.content)
+        
+        toc_items = []
+        for level, title_html in headings:
+            # Clean HTML tags from title
+            clean_title = re.sub(r'<[^>]+>', '', title_html).strip()
+            if clean_title:
+                anchor = slugify(clean_title)
+                toc_items.append({
+                    'title': clean_title,
+                    'level': int(level),
+                    'anchor': anchor,
+                    'id': len(toc_items) + 1
+                })
+        
+        self.table_of_contents = toc_items
+
+    def extract_subheadings(self):
+        """Extract subheadings and their following content for structured display"""
+        import re
+        
+        # Pattern to find headings and their following content until next heading
+        pattern = r'<h([1-6])[^>]*>(.*?)</h\1>(.*?)(?=<h[1-6]|$)'
+        matches = re.findall(pattern, self.content, re.DOTALL)
+        
+        subheadings = []
+        for level, title_html, content in matches:
+            clean_title = re.sub(r'<[^>]+>', '', title_html).strip()
+            # Clean content - remove HTML tags for description
+            clean_content = re.sub(r'<[^>]+>', '', content).strip()
+            # Take first 200 characters as description
+            description = clean_content[:200] + '...' if len(clean_content) > 200 else clean_content
+            
+            if clean_title:
+                subheadings.append({
+                    'title': clean_title,
+                    'level': int(level),
+                    'description': description,
+                    'full_content': content.strip()
+                })
+        
+        # Limit to 6 subheadings as per requirement
+        self.subheadings = subheadings[:6]
+
+    def get_toc_display(self):
+        """Format TOC for display with proper indentation"""
+        if not self.table_of_contents:
+            return []
+        
+        formatted_toc = []
+        for item in self.table_of_contents:
+            level = item['level']
+            indent = "  " * (level - 1)  # Indentation based on heading level
+            formatted_toc.append({
+                **item,
+                'display_title': f"{indent}{item['id']}. {item['title']}"
+            })
+        
+        return formatted_toc
+
+    def get_first_two_subheadings(self):
+        """Get first two subheadings for homepage display"""
+        return self.subheadings[:2] if self.subheadings else []
     title = models.CharField(max_length=200)
     description = models.TextField()  # short intro
     content = models.TextField()      # full article

@@ -108,18 +108,19 @@ class AppointmentSerializer(serializers.ModelSerializer):
         return rep
 
 # ---------------- Enhanced Blog Serializers ---------------- #
-
+# hospital/serializers.py - Update blog serializers
 class BlogPostListSerializer(serializers.ModelSerializer):
     author = ProfileSerializer(read_only=True)
     has_toc = serializers.SerializerMethodField()
     toc_items_count = serializers.SerializerMethodField()
+    subheadings_count = serializers.SerializerMethodField()
     
     class Meta:
         model = BlogPost
         fields = [
             'id', 'title', 'description', 'author', 'featured_image',
-            'published', 'published_date', 'created_at', 'slug', 
-            'enable_toc', 'has_toc', 'toc_items_count'
+            'image_1', 'image_2', 'published', 'published_date', 'created_at', 'slug', 
+            'enable_toc', 'has_toc', 'toc_items_count', 'subheadings_count'
         ]
         read_only_fields = ['author', 'published_date', 'created_at', 'updated_at', 'slug']
 
@@ -129,21 +130,26 @@ class BlogPostListSerializer(serializers.ModelSerializer):
     def get_toc_items_count(self, obj):
         return len(obj.table_of_contents) if obj.table_of_contents else 0
 
+    def get_subheadings_count(self, obj):
+        return len(obj.subheadings) if obj.subheadings else 0
+
 
 class BlogPostSerializer(serializers.ModelSerializer):
     author = ProfileSerializer(read_only=True)
     table_of_contents = serializers.SerializerMethodField()
     toc_display = serializers.SerializerMethodField()
+    subheadings = serializers.SerializerMethodField()
+    first_two_subheadings = serializers.SerializerMethodField()
 
     class Meta:
         model = BlogPost
         fields = [
             'id', 'title', 'description', 'content', 'author',
-            'featured_image', 'published', 'published_date',
+            'featured_image', 'image_1', 'image_2', 'published', 'published_date',
             'created_at', 'updated_at', 'slug', 'enable_toc',
-            'table_of_contents', 'toc_display'
+            'table_of_contents', 'toc_display', 'subheadings', 'first_two_subheadings'
         ]
-        read_only_fields = ['author', 'published_date', 'created_at', 'updated_at', 'slug', 'table_of_contents']
+        read_only_fields = ['author', 'published_date', 'created_at', 'updated_at', 'slug', 'table_of_contents', 'subheadings']
 
     def get_table_of_contents(self, obj):
         return obj.table_of_contents
@@ -151,19 +157,25 @@ class BlogPostSerializer(serializers.ModelSerializer):
     def get_toc_display(self, obj):
         return obj.get_toc_display()
 
+    def get_subheadings(self, obj):
+        return obj.subheadings
+
+    def get_first_two_subheadings(self, obj):
+        return obj.get_first_two_subheadings()
+
 
 class BlogPostCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = BlogPost
         fields = [
             'id', 'title', 'description', 'content', 'featured_image',
-            'published', 'enable_toc'
+            'image_1', 'image_2', 'published', 'enable_toc'
         ]
 
     def create(self, validated_data):
-        # TOC will be auto-generated in the model's save method
+        # TOC and subheadings will be auto-generated in the model's save method
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
-        # TOC will be auto-generated in the model's save method
+        # TOC and subheadings will be auto-generated in the model's save method
         return super().update(instance, validated_data)
