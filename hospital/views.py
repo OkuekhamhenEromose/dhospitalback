@@ -1,5 +1,5 @@
 # hospital/views.py
-from rest_framework import generics, permissions, status
+from rest_framework import generics, permissions, status, viewsets
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.views import APIView
@@ -11,7 +11,8 @@ from users.models import Profile
 from django.db import models
 from .serializers import (
     AppointmentSerializer, TestRequestSerializer, VitalRequestSerializer,
-    VitalsSerializer, LabResultSerializer, MedicalReportSerializer, 
+    VitalsSerializer, LabResultSerializer, MedicalReportSerializer, AssignmentSerializer, AppointmentAssignmentSerializer,
+    StaffProfileSerializer, AppointmentDetailSerializer, 
     BlogPostSerializer, BlogPostCreateSerializer, BlogPostListSerializer
 )
 from rest_framework.exceptions import PermissionDenied
@@ -20,7 +21,7 @@ from django.shortcuts import get_object_or_404
 from django.db.models import Q
 from users.serializers import ProfileSerializer
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from rest_framework import status
+from .models import Assignment
 
 # --------------- Appointment ---------------
 class AppointmentCreateView(generics.CreateAPIView):
@@ -44,6 +45,8 @@ class AppointmentCreateView(generics.CreateAPIView):
         print(f"Assigned doctor: {assigned_doctor}")
         print(f"Appointment data: {serializer.data}")
 
+
+
 class AppointmentListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = AppointmentSerializer
@@ -63,7 +66,149 @@ class AppointmentDetailView(generics.RetrieveAPIView):
     serializer_class = AppointmentSerializer
     queryset = Appointment.objects.all()
 
+class AssignmentViewSet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = AssignmentSerializer
+    queryset = Assignment.objects.all()
+    
+    def get_queryset(self):
+        profile = self.request.user.profile
+        if profile.role == 'ADMIN':
+            return Assignment.objects.all()
+        elif profile.role == 'DOCTOR':
+            return Assignment.objects.filter(
+                appointment__doctor=profile
+            )
+        elif profile.role == 'NURSE':
+            return Assignment.objects.filter(staff=profile, role='NURSE')
+        elif profile.role == 'LAB':
+            return Assignment.objects.filter(staff=profile, role='LAB')
+        return Assignment.objects.none()
 
+class AppointmentAssignmentsView(generics.ListAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = AssignmentSerializer
+    
+    def get_queryset(self):
+        appointment_id = self.kwargs['appointment_id']
+        return Assignment.objects.filter(appointment_id=appointment_id)
+
+class AvailableStaffView(generics.ListAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = StaffProfileSerializer
+    
+    def get_queryset(self):
+        role = self.request.query_params.get('role')
+        if role:
+            return Profile.objects.filter(
+                role=role,
+                user__is_active=True
+            )
+        return Profile.objects.filter(
+            role__in=['DOCTOR', 'NURSE', 'LAB'],
+            user__is_active=True
+        )
+
+class AssignStaffView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsRole]
+    allowed_roles = ['ADMIN', 'DOCTOR']
+    
+    def post(self, request):
+        serializer = AppointmentAssignmentSerializer(data=request.data)
+        if serializer.is_valid():
+            appointment_id = serializer.validated_data['appointment_id']
+            staff_id = serializer.validated_data['staff_id']
+            role = serializer.validated_data['role']
+            notes = serializer.validated_data.get('notes', '')
+            
+            try:
+                appointment = Appointment.objects.get(id=appointment_id)
+                staff = Profile.objects.get(id=staff_id)
+                
+                # Validate role matches staff role
+                if staff.role != role:
+                    return Response(
+                        {'error': f'Staff member is not a {role}'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                # Create or update assignment
+                assignment, created = Assignment.objects.update_or_create(
+                    appointment=appointment,
+                    role=role,
+                    defaults={
+                        'staff': staff,
+                        'assigned_by': request.user.profile,
+                        'notes': notes
+                    }
+                )
+                
+                # Update appointment with assigned staff based on role
+                if role == 'DOCTOR':
+                    appointment.doctor = staff
+                    appointment.save()
+                elif role == 'NURSE':
+                    # Create vital request if not exists
+                    VitalRequest.objects.get_or_create(
+                        appointment=appointment,
+                        defaults={
+                            'assigned_to': staff,
+                            'requested_by': request.user.profile
+                        }
+                    )
+                elif role == 'LAB':
+                    # Create test request if not exists
+                    TestRequest.objects.get_or_create(
+                        appointment=appointment,
+                        defaults={
+                            'assigned_to': staff,
+                            'requested_by': request.user.profile,
+                            'tests': 'General tests'
+                        }
+                    )
+                
+                return Response({
+                    'message': f'Successfully assigned {staff.fullname} as {role}',
+                    'assignment': AssignmentSerializer(assignment).data
+                })
+                
+            except Appointment.DoesNotExist:
+                return Response(
+                    {'error': 'Appointment not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            except Profile.DoesNotExist:
+                return Response(
+                    {'error': 'Staff member not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            except Exception as e:
+                return Response(
+                    {'error': str(e)},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+# Update AppointmentDetailView to use AppointmentDetailSerializer
+class AppointmentDetailView(generics.RetrieveAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = AppointmentDetailSerializer
+    queryset = Appointment.objects.all()
+
+# Add PatientListView
+class PatientListView(generics.ListAPIView):
+    permission_classes = [permissions.IsAuthenticated, IsRole]
+    allowed_roles = ['ADMIN', 'DOCTOR']
+    serializer_class = StaffProfileSerializer
+    
+    def get_queryset(self):
+        # Get all patients who have appointments
+        patient_ids = Appointment.objects.values_list('patient_id', flat=True).distinct()
+        return Profile.objects.filter(
+            id__in=patient_ids,
+            role='PATIENT'
+        ).order_by('-user__date_joined')
 # --------------- TestRequest (doctor -> lab) ---------------
 
 class TestRequestCreateView(generics.CreateAPIView):
@@ -150,7 +295,6 @@ class VitalsCreateView(generics.CreateAPIView):
 
 
 # --------------- Lab scientist fills LabResult ---------------
-
 class LabResultCreateView(generics.CreateAPIView):
     permission_classes = [permissions.IsAuthenticated, IsRole]
     allowed_roles = ['LAB']
@@ -177,7 +321,6 @@ class LabResultCreateView(generics.CreateAPIView):
             print(f"All tests completed for {appointment.name}")
 
 # --------------- Doctor creates Medical Report ---------------
-
 class MedicalReportCreateView(generics.CreateAPIView):
     permission_classes = [permissions.IsAuthenticated, IsRole]
     allowed_roles = ['DOCTOR']
@@ -200,58 +343,32 @@ class StaffListView(generics.ListAPIView):
 
 # ---------------- Enhanced Blog Views with TOC ---------------- #
 class BlogPostListCreateView(generics.ListCreateAPIView):
-    """
-    - Anyone can view published blog posts
-    - Only ADMIN role can create blog posts
-    """
     serializer_class = BlogPostListSerializer
-    parser_classes = [MultiPartParser, FormParser, JSONParser]  # Add support for FormData
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
         user = self.request.user
-        # If user is authenticated admin, show all posts
-        if user.is_authenticated and hasattr(user, 'profile') and user.profile.role == 'ADMIN':
-            return BlogPost.objects.all().order_by('-created_at')
-        # Public users can only see published posts
-        return BlogPost.objects.filter(published=True).order_by('-created_at')
+        if user.is_authenticated and hasattr(user, "profile") and user.profile.role == "ADMIN":
+            return BlogPost.objects.all()
+        return BlogPost.objects.filter(published=True)
 
     def get_permissions(self):
-        if self.request.method == 'POST':
+        if self.request.method == "POST":
             return [permissions.IsAuthenticated(), IsRole()]
         return [permissions.AllowAny()]
 
-    allowed_roles = ['ADMIN']
+    allowed_roles = ["ADMIN"]
 
     def get_serializer_class(self):
-        if self.request.method == 'POST':
+        if self.request.method == "POST":
             return BlogPostCreateSerializer
         return BlogPostListSerializer
 
     def perform_create(self, serializer):
-        profile = self.request.user.profile
-        if profile.role != 'ADMIN':
+        if self.request.user.profile.role != "ADMIN":
             raise PermissionDenied("Only admins can create blog posts.")
-        serializer.save(author=profile)
+        serializer.save(author=self.request.user.profile)
 
-    def create(self, request, *args, **kwargs):
-        try:
-            # Handle FormData properly
-            if request.content_type == 'multipart/form-data':
-                # For FormData, use the appropriate serializer
-                serializer = self.get_serializer(data=request.data)
-                serializer.is_valid(raise_exception=True)
-                self.perform_create(serializer)
-                headers = self.get_success_headers(serializer.data)
-                return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
-            else:
-                # For JSON data, use the normal flow
-                return super().create(request, *args, **kwargs)
-        except Exception as e:
-            print(f"Error creating blog post: {str(e)}")
-            return Response(
-                {"error": "Failed to create blog post", "details": str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
 
 class BlogPostDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
@@ -338,11 +455,12 @@ class AdminBlogPostListView(generics.ListAPIView):
         return BlogPost.objects.all().order_by('-created_at')
 
 
+# hospital/views.py - Update BlogPostLatestView to use full serializer
 class BlogPostLatestView(generics.ListAPIView):
     """
     Get latest published blog posts
     """
-    serializer_class = BlogPostListSerializer
+    serializer_class = BlogPostSerializer  # Changed from BlogPostListSerializer to BlogPostSerializer
     permission_classes = [permissions.AllowAny]
     
     def get_queryset(self):
@@ -353,11 +471,9 @@ class BlogPostLatestView(generics.ListAPIView):
             limit = 6
             
         # Only return published posts, ordered by published_date or created_at
-        # Use distinct to avoid duplicates
         return BlogPost.objects.filter(
             published=True
-        ).order_by('-published_date', '-created_at').distinct()[:limit]
-
+        ).order_by('-published_date', '-created_at')[:limit]
 
 class BlogPostByAuthorView(generics.ListAPIView):
     """

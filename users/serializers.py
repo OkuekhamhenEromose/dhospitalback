@@ -15,10 +15,16 @@ class UserSerializer(serializers.ModelSerializer):
 
 class ProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)  # Keep only this
+    profile_pix = serializers.SerializerMethodField()
 
     class Meta:
         model = Profile
         fields = ['user', 'fullname', 'phone', 'gender', 'profile_pix', 'role']  # Remove 'username' and 'email'
+
+    def get_profile_pix(self, obj):
+        if obj.profile_pix:
+            return obj.profile_pix.url
+        return None
 
 class RegistrationSerializer(serializers.Serializer):
     username = serializers.CharField()
@@ -35,6 +41,7 @@ class RegistrationSerializer(serializers.Serializer):
         choices=ROLE_CHOICES,
         default='PATIENT'
     )
+    profile_pix = serializers.ImageField(required=False, allow_null=True)
 
     def validate(self, data):
         if data['password1'] != data['password2']:
@@ -55,6 +62,7 @@ class RegistrationSerializer(serializers.Serializer):
         email = validated_data.pop('email')
         password = validated_data.pop('password1')
         validated_data.pop('password2', None)
+        profile_pix = validated_data.pop('profile_pix', None)
 
         # Create the user
         user = User.objects.create_user(
@@ -71,6 +79,9 @@ class RegistrationSerializer(serializers.Serializer):
         profile.phone = validated_data.get('phone', '')
         profile.gender = validated_data.get('gender', None)
         profile.role = validated_data.get('role', 'PATIENT')
+
+        if profile_pix:
+            profile.profile_pix = profile_pix
         profile.save()
 
         # Send welcome email

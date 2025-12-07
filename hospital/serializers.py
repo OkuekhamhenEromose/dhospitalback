@@ -2,7 +2,7 @@
 from rest_framework import serializers
 from .models import (
     Appointment, Vitals, LabResult, MedicalReport, BlogPost,
-    TestRequest, VitalRequest
+    TestRequest, VitalRequest, Assignment
 )
 from users.models import Profile
 from users.serializers import ProfileSerializer
@@ -52,14 +52,48 @@ class MedicalReportSerializer(serializers.ModelSerializer):
         fields = ['id', 'appointment', 'doctor', 'medical_condition', 'drug_prescription', 'advice', 'next_appointment', 'created_at']
         read_only_fields = ['doctor', 'created_at']
 
+class AssignmentSerializer(serializers.ModelSerializer):
+    appointment = serializers.PrimaryKeyRelatedField(read_only=True)
+    appointment_id = serializers.PrimaryKeyRelatedField(
+        queryset=Appointment.objects.all(), write_only=True, source='appointment'
+    )
+    staff = ProfileSerializer(read_only=True)
+    staff_id = serializers.PrimaryKeyRelatedField(
+        queryset=Profile.objects.all(), write_only=True, source='staff'
+    )
+    assigned_by = ProfileSerializer(read_only=True)
+    
+    class Meta:
+        model = Assignment
+        fields = '__all__'
+        read_only_fields = ['assigned_by', 'assigned_at']
+
 class AppointmentSerializer(serializers.ModelSerializer):
     patient = ProfileSerializer(read_only=True)
     doctor = serializers.PrimaryKeyRelatedField(read_only=True)
+    assignments = AssignmentSerializer(many=True, read_only=True)
+    assigned_doctor = serializers.SerializerMethodField()
+    assigned_nurse = serializers.SerializerMethodField()
+    assigned_lab = serializers.SerializerMethodField()
 
     class Meta:
         model = Appointment
-        fields = ['id', 'patient', 'patient_id', 'name', 'age', 'sex', 'message', 'address', 'booked_at', 'doctor', 'status']
+        fields = ['id', 'patient', 'patient_id', 'name', 'age', 'sex', 'message', 'address', 
+                 'booked_at', 'doctor', 'status', 'assignments', 'assigned_doctor', 
+                 'assigned_nurse', 'assigned_lab']
         read_only_fields = ['booked_at', 'status', 'doctor']
+
+    def get_assigned_doctor(self, obj):
+        assignment = obj.assignments.filter(role='DOCTOR').first()
+        return AssignmentSerializer(assignment).data if assignment else None
+    
+    def get_assigned_nurse(self, obj):
+        assignment = obj.assignments.filter(role='NURSE').first()
+        return AssignmentSerializer(assignment).data if assignment else None
+    
+    def get_assigned_lab(self, obj):
+        assignment = obj.assignments.filter(role='LAB').first()
+        return AssignmentSerializer(assignment).data if assignment else None
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
@@ -107,75 +141,114 @@ class AppointmentSerializer(serializers.ModelSerializer):
         
         return rep
 
-# ---------------- Enhanced Blog Serializers ---------------- #
-# hospital/serializers.py - Update blog serializers
-class BlogPostListSerializer(serializers.ModelSerializer):
-    author = ProfileSerializer(read_only=True)
-    has_toc = serializers.SerializerMethodField()
-    toc_items_count = serializers.SerializerMethodField()
-    subheadings_count = serializers.SerializerMethodField()
+# Enhanced Appointment Serializer for detailed view
+class AppointmentDetailSerializer(serializers.ModelSerializer):
+    patient = ProfileSerializer(read_only=True)
+    doctor = ProfileSerializer(read_only=True)
+    assignments = AssignmentSerializer(many=True, read_only=True)
+    test_requests = TestRequestSerializer(many=True, read_only=True)
+    vital_requests = VitalRequestSerializer(many=True, read_only=True)
     
+    class Meta:
+        model = Appointment
+        fields = '__all__'
+
+# ---------------- Enhanced Blog Serializers ---------------- #
+
+class BlogPostListSerializer(serializers.ModelSerializer):
+    subheadings = serializers.SerializerMethodField()
+    featured_image = serializers.SerializerMethodField()
+    image_1 = serializers.SerializerMethodField()
+    image_2 = serializers.SerializerMethodField()
+
     class Meta:
         model = BlogPost
         fields = [
-            'id', 'title', 'description', 'author', 'featured_image',
-            'image_1', 'image_2', 'published', 'published_date', 'created_at', 'slug', 
-            'enable_toc', 'has_toc', 'toc_items_count', 'subheadings_count'
+            "title", "slug", "description", "featured_image",
+            "image_1", "image_2", "published", "created_at",
+            "table_of_contents", "subheadings"
         ]
-        read_only_fields = ['author', 'published_date', 'created_at', 'updated_at', 'slug']
 
-    def get_has_toc(self, obj):
-        return obj.enable_toc and bool(obj.table_of_contents)
+    def get_featured_image(self, obj):
+        return obj.featured_image.url if obj.featured_image else None
 
-    def get_toc_items_count(self, obj):
-        return len(obj.table_of_contents) if obj.table_of_contents else 0
+    def get_image_1(self, obj):
+        return obj.image_1.url if obj.image_1 else None
 
-    def get_subheadings_count(self, obj):
-        return len(obj.subheadings) if obj.subheadings else 0
+    def get_image_2(self, obj):
+        return obj.image_2.url if obj.image_2 else None
+    
+    def get_subheadings(self, obj):
+        return [
+            {**s, "id": idx + 1} for idx, s in enumerate(obj.subheadings)
+        ]
+
+# ---------------- Blog Supporting Serializers ---------------- #
+
+class SubheadingSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    title = serializers.CharField()
+    level = serializers.IntegerField()
+    description = serializers.CharField()
+    full_content = serializers.CharField()
+
+
+class TOCSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    title = serializers.CharField()
+    level = serializers.IntegerField()
+    anchor = serializers.CharField()
 
 
 class BlogPostSerializer(serializers.ModelSerializer):
-    author = ProfileSerializer(read_only=True)
-    table_of_contents = serializers.SerializerMethodField()
-    toc_display = serializers.SerializerMethodField()
-    subheadings = serializers.SerializerMethodField()
-    first_two_subheadings = serializers.SerializerMethodField()
+    table_of_contents = TOCSerializer(many=True, read_only=True)
+    subheadings = SubheadingSerializer(many=True, read_only=True)
+
+    featured_image = serializers.SerializerMethodField()
+    image_1 = serializers.SerializerMethodField()
+    image_2 = serializers.SerializerMethodField()
+
+    author_name = serializers.SerializerMethodField()
 
     class Meta:
         model = BlogPost
-        fields = [
-            'id', 'title', 'description', 'content', 'author',
-            'featured_image', 'image_1', 'image_2', 'published', 'published_date',
-            'created_at', 'updated_at', 'slug', 'enable_toc',
-            'table_of_contents', 'toc_display', 'subheadings', 'first_two_subheadings'
-        ]
-        read_only_fields = ['author', 'published_date', 'created_at', 'updated_at', 'slug', 'table_of_contents', 'subheadings']
+        fields = "__all__"
 
-    def get_table_of_contents(self, obj):
-        return obj.table_of_contents
+    def get_author_name(self, obj):
+        return obj.author.fullname
 
-    def get_toc_display(self, obj):
-        return obj.get_toc_display()
+    def get_featured_image(self, obj):
+        return obj.featured_image.url if obj.featured_image else None
 
-    def get_subheadings(self, obj):
-        return obj.subheadings
+    def get_image_1(self, obj):
+        return obj.image_1.url if obj.image_1 else None
 
-    def get_first_two_subheadings(self, obj):
-        return obj.get_first_two_subheadings()
-
+    def get_image_2(self, obj):
+        return obj.image_2.url if obj.image_2 else None
 
 class BlogPostCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = BlogPost
-        fields = [
-            'id', 'title', 'description', 'content', 'featured_image',
-            'image_1', 'image_2', 'published', 'enable_toc'
-        ]
+        fields = "__all__"
+        read_only_fields = ['author']
 
-    def create(self, validated_data):
-        # TOC and subheadings will be auto-generated in the model's save method
-        return super().create(validated_data)
+# Profile Serializer for staff listings
+class StaffProfileSerializer(serializers.ModelSerializer):
+    user = serializers.StringRelatedField(read_only=True)
+    profile_pix = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Profile
+        fields = ['id', 'user', 'fullname', 'phone', 'gender', 'profile_pix', 'role']
+    
+    def get_profile_pix(self, obj):
+        if obj.profile_pix:
+            return obj.profile_pix.url
+        return None
 
-    def update(self, instance, validated_data):
-        # TOC and subheadings will be auto-generated in the model's save method
-        return super().update(instance, validated_data)
+# Appointment assignment serializer
+class AppointmentAssignmentSerializer(serializers.Serializer):
+    appointment_id = serializers.IntegerField(required=True)
+    staff_id = serializers.IntegerField(required=True)
+    role = serializers.ChoiceField(choices=['DOCTOR', 'NURSE', 'LAB'], required=True)
+    notes = serializers.CharField(required=False, allow_blank=True)

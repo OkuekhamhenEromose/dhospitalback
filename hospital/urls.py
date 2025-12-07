@@ -1,12 +1,19 @@
 # hospital/urls.py
-from django.urls import path
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
 from . import views
+
+router = DefaultRouter()
+router.register(r'assignments', views.AssignmentViewSet, basename='assignment')
 
 urlpatterns = [
     # Appointments
     path('appointments/', views.AppointmentListView.as_view(), name='appointment-list'),
     path('appointments/create/', views.AppointmentCreateView.as_view(), name='appointment-create'),
     path('appointments/<int:pk>/', views.AppointmentDetailView.as_view(), name='appointment-detail'),
+    
+    # Patients
+    path('patients/', views.PatientListView.as_view(), name='patients-list'),
 
     # Test Requests (doctor -> lab)
     path('test-requests/', views.TestRequestListView.as_view(), name='testrequest-list'),
@@ -25,6 +32,16 @@ urlpatterns = [
     # Doctor posts final report
     path('medical-reports/create/', views.MedicalReportCreateView.as_view(), name='medicalreport-create'),
     path('staff/', views.StaffListView.as_view(), name='staff-list'),
+
+    # Staff Availability
+    path('staff/available/', views.AvailableStaffView.as_view(), name='available-staff'),
+    
+    # Assignments
+    path('', include(router.urls)),
+    path('appointments/<int:appointment_id>/assignments/', 
+         views.AppointmentAssignmentsView.as_view(),
+         name='appointment-assignments'),
+    path('assign-staff/', views.AssignStaffView.as_view(), name='assign-staff'),
 
     # ---------------- Enhanced Blog URLs ----------------
     # Public blog endpoints
