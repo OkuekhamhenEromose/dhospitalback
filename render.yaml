@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: hospital-backend
+    env: python
+    pythonVersion: "3.11"  # Use 3.11 instead of 3.13
+    buildCommand: |
+      pip install -r requirements.txt
+      python manage.py collectstatic --noinput
+      python manage.py migrate
+    startCommand: gunicorn api.wsgi:application --bind 0.0.0.0:$PORT
