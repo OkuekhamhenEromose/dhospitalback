@@ -56,47 +56,88 @@ class RegistrationView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+# users/views.py - Update LoginView
 class LoginView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
         username = request.data.get('username')
         password = request.data.get('password')
+        
+        if not username or not password:
+            return Response(
+                {'detail': 'Username and password are required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Authenticate user
         user = authenticate(username=username, password=password)
         
-        if user:
-            refresh = RefreshToken.for_user(user)
-            
-            # Optimized: Only fetch necessary profile data
+        if user is None:
+            # Try with email
             try:
-                profile = Profile.objects.get(user=user)
-                profile_data = {
-                    'role': profile.role,
-                    'fullname': profile.fullname,
-                    'profile_pix': profile.profile_pix.url if profile.profile_pix else None,
-                    'phone': profile.phone,
-                    'gender': profile.gender,                  
-                }
-            except Profile.DoesNotExist:
-                profile_data = {}
-            
-            response_data = {
-                'access': str(refresh.access_token),
-                'refresh': str(refresh),
-                'user': {
-                    'id': user.id,
-                    'username': user.username,
-                    'email': user.email,
-                    'profile': profile_data
-                }
-            }
-                        
-            return Response(response_data, status=status.HTTP_200_OK)
+                user = User.objects.get(email=username)
+                user = authenticate(username=user.username, password=password)
+            except User.DoesNotExist:
+                pass
         
-        return Response(
-            {'detail': 'Invalid credentials'}, 
-            status=status.HTTP_400_BAD_REQUEST
-        )
+        if user is None:
+            return Response(
+                {'detail': 'Invalid credentials'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if not user.is_active:
+            return Response(
+                {'detail': 'Account is disabled'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Generate tokens
+        from rest_framework_simplejwt.tokens import RefreshToken
+        
+        try:
+            refresh = RefreshToken.for_user(user)
+        except Exception as e:
+            logger.error(f"Token generation failed: {str(e)}")
+            return Response(
+                {'detail': 'Authentication failed'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+        # Get profile data
+        try:
+            profile = Profile.objects.select_related('user').get(user=user)
+            profile_data = {
+                'role': profile.role,
+                'fullname': profile.fullname,
+                'profile_pix': profile.profile_pix.url if profile.profile_pix else None,
+                'phone': profile.phone,
+                'gender': profile.gender,
+            }
+        except Profile.DoesNotExist:
+            logger.warning(f"Profile not found for user {user.id}")
+            profile_data = {
+                'role': 'PATIENT',
+                'fullname': user.get_full_name() or user.username,
+                'profile_pix': None,
+                'phone': None,
+                'gender': None,
+            }
+        
+        response_data = {
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'profile': profile_data
+            }
+        }
+        
+        logger.info(f"User {user.username} logged in successfully")
+        return Response(response_data, status=status.HTTP_200_OK)
 
 class LogoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -205,7 +246,7 @@ class SocialAuthSuccessView(APIView):
             refresh = RefreshToken.for_user(request.user)
             
             # Redirect to frontend with tokens
-            frontend_url = "http://localhost:5173"  # Update with your frontend URL
+            frontend_url = "https://ettahospitalclone.vercel.app"  # Update with your frontend URL
             redirect_url = f"{frontend_url}/auth/callback?access={str(refresh.access_token)}&refresh={str(refresh)}"
             
             from django.shortcuts import redirect
@@ -218,7 +259,7 @@ class SocialAuthErrorView(APIView):
     
     def get(self, request):
         error = request.GET.get('error', 'Unknown error occurred')
-        frontend_url = "http://localhost:5173"
+        frontend_url = "https://ettahospitalclone.vercel.app"
         
         from django.shortcuts import redirect
         return redirect(f"{frontend_url}/auth/error?message={error}")
