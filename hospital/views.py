@@ -340,6 +340,32 @@ class StaffListView(generics.ListAPIView):
         return Profile.objects.filter(
             Q(role='DOCTOR') | Q(role='NURSE') | Q(role='LAB')
         ).filter(user__is_active=True)
+    
+# In hospital/views.py - Update AvailableStaffView
+class AvailableStaffView(generics.ListAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = StaffProfileSerializer
+    
+    def get_queryset(self):
+        role = self.request.query_params.get('role')
+        
+        if role:
+            # Validate the role
+            valid_roles = ['DOCTOR', 'NURSE', 'LAB']
+            if role.upper() not in valid_roles:
+                return Profile.objects.none()
+            
+            # Filter by specific role
+            return Profile.objects.filter(
+                role=role.upper(),
+                user__is_active=True
+            )
+        
+        # If no role specified, return all staff (DOCTOR, NURSE, LAB)
+        return Profile.objects.filter(
+            role__in=['DOCTOR', 'NURSE', 'LAB'],
+            user__is_active=True
+        )
 
 # ---------------- Enhanced Blog Views with TOC ---------------- #
 class BlogPostListCreateView(generics.ListCreateAPIView):
