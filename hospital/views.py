@@ -480,8 +480,7 @@ class AdminBlogPostListView(generics.ListAPIView):
     def get_queryset(self):
         return BlogPost.objects.all().order_by('-created_at')
 
-
-# In hospital/views.py - Add debugging to BlogPostLatestView
+# In hospital/views.py - Add debugging to BlogPostLatestView and Make sure we include unpublished posts for admins
 class BlogPostLatestView(generics.ListAPIView):
     serializer_class = BlogPostSerializer
     permission_classes = [permissions.AllowAny]
@@ -492,24 +491,23 @@ class BlogPostLatestView(generics.ListAPIView):
             limit = int(limit)
         except (TypeError, ValueError):
             limit = 6
+        
+        user = self.request.user
+        
+        # For authenticated admin users, show all posts
+        if user.is_authenticated and hasattr(user, "profile") and user.profile.role == "ADMIN":
+            queryset = BlogPost.objects.all()
+        else:
+            # For public users, only show published posts
+            queryset = BlogPost.objects.filter(published=True)
+        
+        # Order by date
+        if queryset.filter(published_date__isnull=False).exists():
+            queryset = queryset.order_by('-published_date')
+        else:
+            queryset = queryset.order_by('-created_at')
             
-        print(f"🎯 BlogPostLatestView called with limit={limit}")
-        
-        queryset = BlogPost.objects.filter(
-            published=True
-        ).order_by('-published_date', '-created_at')[:limit]
-        
-        print(f"📊 Found {queryset.count()} published posts")
-        for post in queryset:
-            print(f"  - {post.title} (ID: {post.id}, Slug: {post.slug})")
-        
-        return queryset
-    
-    def list(self, request, *args, **kwargs):
-        response = super().list(request, *args, **kwargs)
-        print(f"📦 Sending response with {len(response.data)} posts")
-        return response
-
+        return queryset[:limit]
 class BlogPostByAuthorView(generics.ListAPIView):
     """
     Get blog posts by specific author
