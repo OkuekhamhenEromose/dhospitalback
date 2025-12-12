@@ -171,6 +171,14 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
+# Add this to serve media files in production on Render
+if not DEBUG:
+    # Tell Django to copy static files into the staticfiles directory
+    STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+    
+    # Enable WhiteNoise for serving static files
+    STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
 # Email
 EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
 EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')

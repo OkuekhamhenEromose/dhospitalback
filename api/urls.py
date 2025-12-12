@@ -11,4 +11,10 @@ urlpatterns = [
     # jwt
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-]+static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+]#+static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+else:
+    # In production on Render, still serve media files
+    # This is a temporary solution
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
