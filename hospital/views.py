@@ -481,12 +481,9 @@ class AdminBlogPostListView(generics.ListAPIView):
         return BlogPost.objects.all().order_by('-created_at')
 
 
-# hospital/views.py - Update BlogPostLatestView to use full serializer
+# In hospital/views.py - Add debugging to BlogPostLatestView
 class BlogPostLatestView(generics.ListAPIView):
-    """
-    Get latest published blog posts
-    """
-    serializer_class = BlogPostSerializer  # Changed from BlogPostListSerializer to BlogPostSerializer
+    serializer_class = BlogPostSerializer
     permission_classes = [permissions.AllowAny]
     
     def get_queryset(self):
@@ -496,10 +493,22 @@ class BlogPostLatestView(generics.ListAPIView):
         except (TypeError, ValueError):
             limit = 6
             
-        # Only return published posts, ordered by published_date or created_at
-        return BlogPost.objects.filter(
+        print(f"🎯 BlogPostLatestView called with limit={limit}")
+        
+        queryset = BlogPost.objects.filter(
             published=True
         ).order_by('-published_date', '-created_at')[:limit]
+        
+        print(f"📊 Found {queryset.count()} published posts")
+        for post in queryset:
+            print(f"  - {post.title} (ID: {post.id}, Slug: {post.slug})")
+        
+        return queryset
+    
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        print(f"📦 Sending response with {len(response.data)} posts")
+        return response
 
 class BlogPostByAuthorView(generics.ListAPIView):
     """

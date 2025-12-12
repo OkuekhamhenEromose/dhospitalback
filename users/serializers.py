@@ -13,17 +13,27 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ['id', 'username', 'email']
 
+# In users/serializers.py - Update ProfileSerializer
 class ProfileSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)  # Keep only this
+    user = UserSerializer(read_only=True)
     profile_pix = serializers.SerializerMethodField()
 
     class Meta:
         model = Profile
-        fields = ['user', 'fullname', 'phone', 'gender', 'profile_pix', 'role']  # Remove 'username' and 'email'
+        fields = ['user', 'fullname', 'phone', 'gender', 'profile_pix', 'role']
 
     def get_profile_pix(self, obj):
+        request = self.context.get('request') if self.context else None
+        
         if obj.profile_pix:
-            return obj.profile_pix.url
+            if request:
+                return request.build_absolute_uri(obj.profile_pix.url)
+            else:
+                # Fallback: return full URL
+                from django.conf import settings
+                if obj.profile_pix.name.startswith('http'):
+                    return obj.profile_pix.name
+                return f"{settings.BASE_URL}{obj.profile_pix.url}" if hasattr(settings, 'BASE_URL') else obj.profile_pix.url
         return None
 
 class RegistrationSerializer(serializers.Serializer):

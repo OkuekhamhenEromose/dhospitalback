@@ -108,10 +108,15 @@ class LoginView(APIView):
         # Get profile data
         try:
             profile = Profile.objects.select_related('user').get(user=user)
+            # Use ProfileSerializer with request context
+            profile_serializer = ProfileSerializer(
+                profile, 
+                context={'request': request}
+            )
             profile_data = {
                 'role': profile.role,
                 'fullname': profile.fullname,
-                'profile_pix': profile.profile_pix.url if profile.profile_pix else None,
+                'profile_pix': profile_serializer.data.get('profile_pix'),
                 'phone': profile.phone,
                 'gender': profile.gender,
             }
@@ -173,11 +178,14 @@ class DashboardView(APIView):
     def get(self, request):        
         try:
             profile = Profile.objects.select_related('user').get(user=request.user)
-            serializer = ProfileSerializer(profile)
+            serializer = ProfileSerializer(
+                profile, 
+                context={'request': request}
+            )
             profile_data = {
                 'role': profile.role,
                 'fullname': profile.fullname,
-                'profile_pix': profile.profile_pix.url if profile.profile_pix else None,
+                'profile_pix': serializer.data.get('profile_pix'),
                 'phone': profile.phone,
                 'gender': profile.gender,
             }
@@ -186,7 +194,7 @@ class DashboardView(APIView):
                     'id': request.user.id,
                     'username': request.user.username,
                     'email': request.user.email,
-                    'profile': serializer.data
+                    'profile': profile_data
                 }
             }
                         
