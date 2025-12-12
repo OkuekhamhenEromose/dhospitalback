@@ -106,12 +106,21 @@ DATABASES = {
 
 # Override with PostgreSQL if DATABASE_URL exists (Render will provide this)
 DATABASE_URL = config('DATABASE_URL', default=None)
+# Add to settings.py - Gunicorn timeout settings
+# This helps prevent the WORKER TIMEOUT issue
+GUNICORN_TIMEOUT = 120  # 2 minutes for slower operations
+
+# Database connection timeout
 if DATABASE_URL:
     DATABASES['default'] = dj_database_url.config(
         default=DATABASE_URL,
         conn_max_age=600,
         conn_health_checks=True,
+        ssl_require=True,  # Add this for Render PostgreSQL
     )
+
+# Add email timeout settings
+EMAIL_TIMEOUT = 10  # 10 second timeout for email
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [

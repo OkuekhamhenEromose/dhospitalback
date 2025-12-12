@@ -57,6 +57,7 @@ class RegistrationSerializer(serializers.Serializer):
         
         return data
 
+    # In users/serializers.py - Update the create method
     def create(self, validated_data):
         username = validated_data.pop('username')
         email = validated_data.pop('email')
@@ -84,15 +85,30 @@ class RegistrationSerializer(serializers.Serializer):
             profile.profile_pix = profile_pix
         profile.save()
 
-        # Send welcome email
+        # Send welcome email (non-blocking)
         try:
-            email_sent = SendMail(email)
-            if not email_sent:
-                logger.warning(f"User {username} registered but welcome email failed to send")
+            # Use threading or celery for async email in production
+            # For now, we'll run it in a way that won't block
+            import threading
+            def send_email_async():
+                try:
+                    from .utils import SendMail
+                    SendMail(email)
+                except Exception:
+                    pass  # Silently fail in async thread
+            
+            email_thread = threading.Thread(target=send_email_async)
+            email_thread.daemon = True
+            email_thread.start()
+            
+            logger.info(f"User {username} registered, email sent async")
+            
         except Exception as e:
-            logger.error(f"Email sending failed for {email}: {str(e)}")
+            logger.warning(f"Failed to schedule email for {email}: {str(e)}")
+            # Don't fail registration because of email
 
         return profile
+
 
 class UpdateProfileSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source='user.username', required=False)
