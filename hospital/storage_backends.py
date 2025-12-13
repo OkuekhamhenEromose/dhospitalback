@@ -6,6 +6,10 @@ class MediaStorage(S3Boto3Storage):
     file_overwrite = False
     default_acl = 'public-read'
     
+    def __init__(self, *args, **kwargs):
+        kwargs['default_acl'] = 'public-read'
+        super().__init__(*args, **kwargs)
+    
     def _get_write_parameters(self, name, content=None):
         """
         Override to ensure ACL is always set to public-read

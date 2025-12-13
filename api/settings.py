@@ -169,13 +169,21 @@ AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default='')
 AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME', default='etha-hospital')
 AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='eu-north-1')
 
+AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
+AWS_S3_USE_SSL = True
+AWS_S3_SECURE_URLS = True
+AWS_DEFAULT_ACL = 'public-read'
+
 # Only use S3 if credentials are provided
 if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY and AWS_STORAGE_BUCKET_NAME:
     DEFAULT_FILE_STORAGE = 'hospital.storage_backends.MediaStorage'
     AWS_QUERYSTRING_AUTH = False
     AWS_S3_FILE_OVERWRITE = False
-    AWS_S3_OBJECT_PARAMETERS = {'CacheControl': 'max-age=86400'}
-    MEDIA_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com/media/"
+    AWS_S3_OBJECT_PARAMETERS = {
+        'CacheControl': 'max-age=86400',
+        'ACL': 'public-read'
+    }
+    MEDIA_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/media/'
 else:
     DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
     MEDIA_URL = '/media/'
@@ -311,3 +319,10 @@ try:
     _ = storage_module.default_storage._wrapped
 except:
     _ = storage_module.default_storage.__class__
+
+# Increase upload limits for blog posts with images
+DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB
+
+# If using Gunicorn (Render uses it), add timeout
+GUNICORN_TIMEOUT = 180  # 3 minutes for large uploads
