@@ -230,17 +230,152 @@ class UpdateProfileView(APIView):
             return Response(serializer.data)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+# users/views.py - Update SocialAuthLoginView
+class SocialAuthLoginView(APIView):
+    permission_classes = [permissions.AllowAny]
+    
+    def post(self, request):
+        """Alternative social auth login that returns JWT directly (Google only)"""
+        provider = request.data.get('provider')
+        access_token = request.data.get('access_token')
+        
+        if not provider or not access_token:
+            return Response(
+                {'error': 'Provider and access token required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Only allow Google
+        if provider != 'google':
+            return Response(
+                {'error': 'Only Google authentication is supported'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            # Verify the Google token and get user data
+            user_data = self.verify_google_token(access_token)
+            if not user_data:
+                return Response(
+                    {'error': 'Invalid Google token'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Find or create user
+            user, created = self.get_or_create_social_user(user_data)
+            
+            # Generate JWT tokens
+            refresh = RefreshToken.for_user(user)
+            
+            # Get profile data
+            try:
+                profile = Profile.objects.get(user=user)
+                profile_data = {
+                    'role': profile.role,
+                    'fullname': profile.fullname,
+                    'profile_pix': profile.profile_pix.url if profile.profile_pix else None,
+                    'phone': profile.phone,
+                    'gender': profile.gender,
+                }
+            except Profile.DoesNotExist:
+                profile_data = {}
+            
+            response_data = {
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+                'user': {
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email,
+                    'profile': profile_data
+                },
+                'is_new_user': created
+            }
+            
+            return Response(response_data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Google auth login error: {str(e)}")
+            return Response(
+                {'error': 'Google authentication failed'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+    def verify_google_token(self, access_token):
+        """Verify Google token with Google API"""
+        try:
+            response = requests.get(
+                'https://www.googleapis.com/oauth2/v3/userinfo',
+                params={'access_token': access_token}
+            )
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    'email': data.get('email'),
+                    'name': data.get('name'),
+                    'first_name': data.get('given_name'),
+                    'last_name': data.get('family_name'),
+                    'picture': data.get('picture'),
+                }
+            return None
+            
+        except Exception as e:
+            logger.error(f"Google token verification error: {str(e)}")
+            return None
+    
+    def get_or_create_social_user(self, user_data):
+        """Find or create user from Google data"""
+        email = user_data.get('email')
+        if not email:
+            raise ValueError("Email is required for Google authentication")
+        
+        try:
+            # Try to find existing user by email
+            user = User.objects.get(email=email)
+            created = False
+        except User.DoesNotExist:
+            # Create new user
+            username = self.generate_username(user_data.get('name', ''), email)
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                password=None  # No password for Google auth users
+            )
+            user.first_name = user_data.get('first_name', '')
+            user.last_name = user_data.get('last_name', '')
+            user.save()
+            created = True
+            
+            # Create profile
+            profile, _ = Profile.objects.get_or_create(user=user)
+            profile.fullname = user_data.get('name', f"{user.first_name} {user.last_name}".strip())
+            profile.save()
+        
+        return user, created
+    
+    def generate_username(self, name, email):
+        """Generate unique username from name and email"""
+        base_username = name.replace(' ', '_').lower() if name else email.split('@')[0]
+        username = base_username
+        counter = 1
+        
+        while User.objects.filter(username=username).exists():
+            username = f"{base_username}_{counter}"
+            counter += 1
+        
+        return username
 
+# Update SocialAuthUrlsView to return only Google URL
 class SocialAuthUrlsView(APIView):
     permission_classes = [permissions.AllowAny]
     
     def get(self, request):
         base_url = request.build_absolute_uri('/')[:-1]  # Remove trailing slash
         
+        # Return only Google URL
         return Response({
-            'google': f"{base_url}/api/users/login/google-oauth2/",
-            'facebook': f"{base_url}/api/users/login/facebook/",
-            'linkedin': f"{base_url}/api/users/login/linkedin-oauth2/"
+            'google': f"{base_url}/api/users/login/google-oauth2/"
         })
 
 class SocialAuthSuccessView(APIView):
@@ -272,8 +407,6 @@ class SocialAuthErrorView(APIView):
         from django.shortcuts import redirect
         return redirect(f"{frontend_url}/auth/error?message={error}")
 
-
-class SocialAuthLoginView(APIView):
     permission_classes = [permissions.AllowAny]
     
     def post(self, request):

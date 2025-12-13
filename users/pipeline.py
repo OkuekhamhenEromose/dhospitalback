@@ -8,18 +8,16 @@ logger = logging.getLogger(__name__)
 def create_profile(backend, user, response, *args, **kwargs):
     """
     Pipeline to create or update user profile after social authentication
+    (Google only now)
     """
     try:
         profile, created = Profile.objects.get_or_create(user=user)
         
         if created or not profile.fullname:
-            # Set fullname from social auth data
+            # Set fullname from Google data
             if backend.name == 'google':
                 profile.fullname = response.get('name', '')
-            elif backend.name == 'facebook':
-                profile.fullname = response.get('name', '')
-            elif backend.name == 'linkedin':
-                profile.fullname = f"{response.get('firstName', '')} {response.get('lastName', '')}".strip()
+            # Remove Facebook and LinkedIn logic
             
             # If no name from social auth, use username
             if not profile.fullname:
