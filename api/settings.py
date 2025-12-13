@@ -283,7 +283,27 @@ SOCIAL_AUTH_LOGIN_ERROR_URL = 'https://ettahospitalclone.vercel.app/auth/error'
 SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = config('SOCIAL_AUTH_GOOGLE_OAUTH2_KEY', default='')
 SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = config('SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET', default='')
 SOCIAL_AUTH_GOOGLE_OAUTH2_SCOPE = ['email', 'profile']
-SOCIAL_AUTH_GOOGLE_OAUTH2_REDIRECT_URI = 'https://dhospitalback.onrender.com/auth/complete/google-oauth2/'
+SOCIAL_AUTH_GOOGLE_OAUTH2_REDIRECT_URI = 'https://dhospitalback.onrender.com/complete/google-oauth2/'
+
+# For development
+if DEBUG:
+    SOCIAL_AUTH_GOOGLE_OAUTH2_REDIRECT_URI = 'http://localhost:8000/complete/google-oauth2/'
+
+# Fix redirect URLs
+LOGIN_URL = '/login/'
+LOGIN_REDIRECT_URL = '/api/users/dashboard/'
+SOCIAL_AUTH_LOGIN_REDIRECT_URL = '/api/users/social-auth-success/'
+SOCIAL_AUTH_LOGIN_ERROR_URL = '/api/users/social-auth-error/'
+
+# Important: This allows email-based login
+SOCIAL_AUTH_USERNAME_IS_FULL_EMAIL = True
+SOCIAL_AUTH_PROTECTED_USER_FIELDS = ['email', 'username']
+
+# Ensure email is collected
+SOCIAL_AUTH_GOOGLE_OAUTH2_AUTH_EXTRA_ARGUMENTS = {
+    'access_type': 'online',
+    'prompt': 'select_account consent',
+}
 
 # JWT settings for social auth
 SOCIAL_AUTH_STRATEGY = 'social_django.strategy.DjangoStrategy'

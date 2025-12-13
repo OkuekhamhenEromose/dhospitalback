@@ -1,4 +1,4 @@
-# users/views.py
+# users/views.py - COMPLETE UPDATED VERSION
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
@@ -17,9 +17,10 @@ from .serializers import (
 from .models import Profile
 import logging
 from django.shortcuts import redirect
-from urllib.parse import urlencode
+import urllib.parse
 import requests
 from django.urls import reverse
+from social_django.models import UserSocialAuth  # Added import
 
 logger = logging.getLogger(__name__)
 
@@ -56,30 +57,30 @@ class RegistrationView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-# users/views.py - Update LoginView
+# UPDATED: LoginView with email support
 class LoginView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        username = request.data.get('username')
+        identifier = request.data.get('username')  # Can be username OR email
         password = request.data.get('password')
         
-        if not username or not password:
+        if not identifier or not password:
             return Response(
-                {'detail': 'Username and password are required'}, 
+                {'detail': 'Username/Email and password are required'}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Authenticate user
-        user = authenticate(username=username, password=password)
+        # Try to authenticate with username first
+        user = authenticate(username=identifier, password=password)
         
         if user is None:
             # Try with email
             try:
-                user = User.objects.get(email=username)
-                user = authenticate(username=user.username, password=password)
+                user_obj = User.objects.get(email=identifier)
+                user = authenticate(username=user_obj.username, password=password)
             except User.DoesNotExist:
-                pass
+                user = None
         
         if user is None:
             return Response(
@@ -94,8 +95,6 @@ class LoginView(APIView):
             )
         
         # Generate tokens
-        from rest_framework_simplejwt.tokens import RefreshToken
-        
         try:
             refresh = RefreshToken.for_user(user)
         except Exception as e:
@@ -230,8 +229,86 @@ class UpdateProfileView(APIView):
             return Response(serializer.data)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+# UPDATED: SocialAuthSuccessView with improved token handling
+class SocialAuthSuccessView(APIView):
+    permission_classes = [permissions.AllowAny]
     
-# users/views.py - Update SocialAuthLoginView
+    def get(self, request):
+        # Generate JWT tokens for the authenticated user
+        from rest_framework_simplejwt.tokens import RefreshToken
+        
+        if request.user.is_authenticated:
+            user = request.user
+            
+            # Check if this is a social auth user
+            try:
+                social_auth = UserSocialAuth.objects.get(user=user, provider='google')
+                logger.info(f"Social auth found for {user.email}")
+            except UserSocialAuth.DoesNotExist:
+                logger.warning(f"No social auth found for {user.email}")
+            
+            # Generate tokens
+            refresh = RefreshToken.for_user(user)
+            
+            # Get profile data
+            try:
+                profile = Profile.objects.select_related('user').get(user=user)
+                profile_data = {
+                    'role': profile.role,
+                    'fullname': profile.fullname,
+                    'profile_pix': profile.profile_pix.url if profile.profile_pix else None,
+                    'phone': profile.phone,
+                    'gender': profile.gender,
+                }
+            except Profile.DoesNotExist:
+                profile_data = {
+                    'role': 'PATIENT',
+                    'fullname': user.get_full_name() or user.username,
+                    'profile_pix': None,
+                    'phone': None,
+                    'gender': None,
+                }
+            
+            # Redirect to frontend with tokens in URL
+            frontend_url = "https://ettahospitalclone.vercel.app"
+            
+            # Create URL with tokens
+            tokens = urllib.parse.urlencode({
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+                'user_id': str(user.id),
+                'email': user.email,
+                'username': user.username,
+            })
+            
+            redirect_url = f"{frontend_url}/auth/callback?{tokens}"
+            
+            logger.info(f"Redirecting to frontend: {redirect_url}")
+            
+            from django.shortcuts import redirect
+            return redirect(redirect_url)
+        
+        # If not authenticated, redirect to login
+        return redirect('/login/?error=social_auth_failed')
+
+# UPDATED: SocialAuthErrorView with better error handling
+class SocialAuthErrorView(APIView):
+    permission_classes = [permissions.AllowAny]
+    
+    def get(self, request):
+        error = request.GET.get('error', 'Unknown error occurred')
+        message = request.GET.get('message', '')
+        
+        logger.error(f"Social auth error: {error} - {message}")
+        
+        frontend_url = "https://ettahospitalclone.vercel.app"
+        error_url = f"{frontend_url}/auth/error?message={urllib.parse.quote(message)}"
+        
+        from django.shortcuts import redirect
+        return redirect(error_url)
+
+# UPDATED: SocialAuthLoginView - simplified for Google only
 class SocialAuthLoginView(APIView):
     permission_classes = [permissions.AllowAny]
     
@@ -366,7 +443,7 @@ class SocialAuthLoginView(APIView):
         
         return username
 
-# Update SocialAuthUrlsView to return only Google URL
+# Keep this view for providing social auth URLs
 class SocialAuthUrlsView(APIView):
     permission_classes = [permissions.AllowAny]
     
@@ -377,200 +454,3 @@ class SocialAuthUrlsView(APIView):
         return Response({
             'google': f"{base_url}/api/users/login/google-oauth2/"
         })
-
-class SocialAuthSuccessView(APIView):
-    permission_classes = [permissions.AllowAny]
-    
-    def get(self, request):
-        # Generate JWT tokens for the authenticated user
-        from rest_framework_simplejwt.tokens import RefreshToken
-        
-        if request.user.is_authenticated:
-            refresh = RefreshToken.for_user(request.user)
-            
-            # Redirect to frontend with tokens
-            frontend_url = "https://ettahospitalclone.vercel.app"  # Update with your frontend URL
-            redirect_url = f"{frontend_url}/auth/callback?access={str(refresh.access_token)}&refresh={str(refresh)}"
-            
-            from django.shortcuts import redirect
-            return redirect(redirect_url)
-        
-        return Response({'error': 'Authentication failed'}, status=status.HTTP_401_UNAUTHORIZED)
-    
-class SocialAuthErrorView(APIView):
-    permission_classes = [permissions.AllowAny]
-    
-    def get(self, request):
-        error = request.GET.get('error', 'Unknown error occurred')
-        frontend_url = "https://ettahospitalclone.vercel.app"
-        
-        from django.shortcuts import redirect
-        return redirect(f"{frontend_url}/auth/error?message={error}")
-
-    permission_classes = [permissions.AllowAny]
-    
-    def post(self, request):
-        """Alternative social auth login that returns JWT directly"""
-        provider = request.data.get('provider')
-        access_token = request.data.get('access_token')
-        
-        if not provider or not access_token:
-            return Response(
-                {'error': 'Provider and access token required'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        try:
-            # Verify the social token and get user data
-            user_data = self.verify_social_token(provider, access_token)
-            if not user_data:
-                return Response(
-                    {'error': 'Invalid social token'}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Find or create user
-            user, created = self.get_or_create_social_user(provider, user_data)
-            
-            # Generate JWT tokens
-            refresh = RefreshToken.for_user(user)
-            
-            # Get profile data
-            try:
-                profile = Profile.objects.get(user=user)
-                profile_data = {
-                    'role': profile.role,
-                    'fullname': profile.fullname,
-                    'profile_pix': profile.profile_pix.url if profile.profile_pix else None,
-                    'phone': profile.phone,
-                    'gender': profile.gender,
-                }
-            except Profile.DoesNotExist:
-                profile_data = {}
-            
-            response_data = {
-                'access': str(refresh.access_token),
-                'refresh': str(refresh),
-                'user': {
-                    'id': user.id,
-                    'username': user.username,
-                    'email': user.email,
-                    'profile': profile_data
-                },
-                'is_new_user': created
-            }
-            
-            return Response(response_data, status=status.HTTP_200_OK)
-            
-        except Exception as e:
-            logger.error(f"Social auth login error: {str(e)}")
-            return Response(
-                {'error': 'Social authentication failed'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-    
-    def verify_social_token(self, provider, access_token):
-        """Verify social token with provider"""
-        try:
-            if provider == 'google':
-                response = requests.get(
-                    'https://www.googleapis.com/oauth2/v3/userinfo',
-                    params={'access_token': access_token}
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    return {
-                        'email': data.get('email'),
-                        'name': data.get('name'),
-                        'first_name': data.get('given_name'),
-                        'last_name': data.get('family_name'),
-                        'picture': data.get('picture'),
-                    }
-            
-            elif provider == 'facebook':
-                response = requests.get(
-                    'https://graph.facebook.com/me',
-                    params={
-                        'access_token': access_token,
-                        'fields': 'id,name,email,first_name,last_name,picture'
-                    }
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    return {
-                        'email': data.get('email'),
-                        'name': data.get('name'),
-                        'first_name': data.get('first_name'),
-                        'last_name': data.get('last_name'),
-                        'picture': data.get('picture', {}).get('data', {}).get('url'),
-                    }
-            
-            elif provider == 'linkedin':
-                response = requests.get(
-                    'https://api.linkedin.com/v2/me',
-                    headers={'Authorization': f'Bearer {access_token}'}
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    # Get email separately
-                    email_response = requests.get(
-                        'https://api.linkedin.com/v2/emailAddress?q=members&projection=(elements*(handle~))',
-                        headers={'Authorization': f'Bearer {access_token}'}
-                    )
-                    email_data = email_response.json() if email_response.status_code == 200 else {}
-                    email = email_data.get('elements', [{}])[0].get('handle~', {}).get('emailAddress', '')
-                    
-                    return {
-                        'email': email,
-                        'name': f"{data.get('localizedFirstName', '')} {data.get('localizedLastName', '')}".strip(),
-                        'first_name': data.get('localizedFirstName', ''),
-                        'last_name': data.get('localizedLastName', ''),
-                    }
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Token verification error for {provider}: {str(e)}")
-            return None
-    
-    def get_or_create_social_user(self, provider, user_data):
-        """Find or create user from social data"""
-        email = user_data.get('email')
-        if not email:
-            raise ValueError("Email is required for social authentication")
-        
-        try:
-            # Try to find existing user by email
-            user = User.objects.get(email=email)
-            created = False
-        except User.DoesNotExist:
-            # Create new user
-            username = self.generate_username(user_data.get('name', ''), email)
-            user = User.objects.create_user(
-                username=username,
-                email=email,
-                password=None  # No password for social auth users
-            )
-            user.first_name = user_data.get('first_name', '')
-            user.last_name = user_data.get('last_name', '')
-            user.save()
-            created = True
-            
-            # Create profile
-            profile, _ = Profile.objects.get_or_create(user=user)
-            profile.fullname = user_data.get('name', f"{user.first_name} {user.last_name}".strip())
-            profile.save()
-        
-        return user, created
-    
-    def generate_username(self, name, email):
-        """Generate unique username from name and email"""
-        base_username = name.replace(' ', '_').lower() if name else email.split('@')[0]
-        username = base_username
-        counter = 1
-        
-        while User.objects.filter(username=username).exists():
-            username = f"{base_username}_{counter}"
-            counter += 1
-        
-        return username

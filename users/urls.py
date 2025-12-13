@@ -1,4 +1,4 @@
-# users/urls.py - UPDATED WITH JWT ENDPOINTS
+# users/urls.py - UPDATED WITH PROPER SOCIAL AUTH
 from django.urls import path, include
 from rest_framework_simplejwt.views import (
     TokenRefreshView,
@@ -23,9 +23,9 @@ urlpatterns = [
     # Social Auth URLs - MUST come before other social-* paths
     path('', include('social_django.urls', namespace='social')),
     
-    # Custom social auth views
-    path('social-login/', views.SocialAuthLoginView.as_view(), name='social-login'),
+    # Custom social auth views - IMPORTANT ORDER
     path('social-auth-success/', views.SocialAuthSuccessView.as_view(), name='social-auth-success'),
     path('social-auth-error/', views.SocialAuthErrorView.as_view(), name='social-auth-error'),
+    path('social-login/', views.SocialAuthLoginView.as_view(), name='social-login'),
     path('social-auth-urls/', views.SocialAuthUrlsView.as_view(), name='social-auth-urls'),
 ]
