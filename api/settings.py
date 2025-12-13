@@ -96,7 +96,6 @@ else:
 # Add database connection pooling (if using PostgreSQL)
 # settings.py - Replace the DATABASES section
 
-
 # Default to SQLite for local development
 DATABASES = {
     'default': {
@@ -164,6 +163,7 @@ CORS_ALLOW_HEADERS = [
 CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', default='http://localhost:5173,http://localhost:5174', cast=Csv())
 CORS_ALLOW_CREDENTIALS = True
 
+# AWS S3 Configuration
 AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default='')
 AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default='')
 AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME', default='etha-hospital')
@@ -171,17 +171,12 @@ AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='eu-north-1')
 
 # Only use S3 if credentials are provided
 if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY and AWS_STORAGE_BUCKET_NAME:
-    DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
-    AWS_DEFAULT_ACL = 'public-read'
+    DEFAULT_FILE_STORAGE = 'hospital.storage_backends.MediaStorage'
     AWS_QUERYSTRING_AUTH = False
     AWS_S3_FILE_OVERWRITE = False
-    AWS_S3_CUSTOM_DOMAIN = f"{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com"
-    AWS_S3_OBJECT_PARAMETERS = {
-        'CacheControl': 'max-age=86400',
-    }
-    MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/media/"
+    AWS_S3_OBJECT_PARAMETERS = {'CacheControl': 'max-age=86400'}
+    MEDIA_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com/media/"
 else:
-    # Fall back to local file storage
     DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
     MEDIA_URL = '/media/'
     MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
@@ -192,17 +187,6 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # Use Whitenoise for static files
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
-
-# MEDIA_URL = '/media/'
-# MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
-
-# # Add this to serve media files in production on Render
-# if not DEBUG:
-#     # Tell Django to copy static files into the staticfiles directory
-#     STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
-    
-#     # Enable WhiteNoise for serving static files
-#     STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # Email
 EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
@@ -315,3 +299,15 @@ SOCIAL_AUTH_LINKEDIN_OAUTH2_FIELD_SELECTORS = ['emailAddress']
 # JWT settings for social auth
 SOCIAL_AUTH_STRATEGY = 'social_django.strategy.DjangoStrategy'
 SOCIAL_AUTH_STORAGE = 'social_django.models.DjangoStorage'
+
+# ==================== FORCE STORAGE INITIALIZATION ==================== #
+# Add this at the VERY END of settings.py
+
+import django.core.files.storage as storage_module
+
+# Force the LazyObject to initialize NOW with correct settings
+# This triggers the LazyObject to load the actual storage class
+try:
+    _ = storage_module.default_storage._wrapped
+except:
+    _ = storage_module.default_storage.__class__

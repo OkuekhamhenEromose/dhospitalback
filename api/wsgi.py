@@ -1,13 +1,8 @@
-"""
-WSGI config for api project.
-
-It exposes the WSGI callable as a module-level variable named ``application``.
-
-For more information on this file, see
-https://docs.djangoproject.com/en/5.2/howto/deployment/wsgi/
-"""
-
+# api/wsgi.py
 import os
+
+# EARLY PATCH - Must be first
+import api.early_init  # This patches default_storage BEFORE Django loads
 
 from django.core.wsgi import get_wsgi_application
 

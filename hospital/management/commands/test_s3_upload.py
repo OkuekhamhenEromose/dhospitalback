@@ -1,3 +1,4 @@
+# hospital/management/commands/test_s3_upload.py
 from django.core.management.base import BaseCommand
 from django.core.files.base import ContentFile
 import tempfile
@@ -27,9 +28,9 @@ class Command(BaseCommand):
                 print("Creating test image...")
                 with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
                     # Create a simple image
-                    img = Image.new('RGB', (100, 100), color='red')
+                    img = Image.new('RGB', (100, 100), color='blue')  # Changed to blue
                     draw = ImageDraw.Draw(img)
-                    draw.text((10, 40), "TEST", fill='white')
+                    draw.text((10, 40), "S3-TEST", fill='white')
                     img.save(tmp.name, format='JPEG')
                     file_to_upload = tmp.name
                     file_extension = '.jpg'
@@ -49,12 +50,6 @@ class Command(BaseCommand):
                     'email': 'test_s3@example.com'
                 }
             )
-            if created:
-                user.set_password('testpassword123')
-                user.save()
-                print(f"✅ Created test user: {user.username}")
-            else:
-                print(f"✅ Using existing test user: {user.username}")
             
             # Try to get Profile model if it exists
             try:
@@ -67,32 +62,40 @@ class Command(BaseCommand):
                     }
                 )
                 author = profile
-                if profile_created:
-                    print(f"✅ Created profile for: {profile.fullname}")
-                else:
-                    print(f"✅ Using existing profile: {profile.fullname}")
             except:
                 # If Profile model doesn't exist, use user as author
                 print("⚠️  Profile model not found, using user as author")
                 author = user
             
-            # Create test blog post
-            post_data = {
-                'title': "Test S3 Upload",
-                'description': "Testing S3 file upload functionality",
-                'content': "<h1>Test Content</h1><p>Testing S3 upload</p>",
-                'author': author,
-                'published': True
-            }
+            # CHECK IF POST ALREADY EXISTS
+            existing_post = BlogPost.objects.filter(title="Test S3 Upload").first()
+            
+            if existing_post:
+                print(f"✅ Using existing blog post: {existing_post.title}")
+                post = existing_post
+            else:
+                # Create NEW test blog post with unique slug
+                import uuid
+                unique_id = str(uuid.uuid4())[:8]
+                
+                post_data = {
+                    'title': f"Test S3 Upload {unique_id}",
+                    'description': "Testing S3 file upload functionality",
+                    'content': "<h1>Test Content</h1><p>Testing S3 upload</p>",
+                    'author': author,
+                    'published': True
+                }
+                
+                post = BlogPost.objects.create(**post_data)
+                print(f"✅ Created new test blog post: {post.title}")
             
             # Check if featured_image field exists
             if hasattr(BlogPost, 'featured_image'):
-                post = BlogPost.objects.create(**post_data)
-                print(f"✅ Created test blog post: {post.title}")
+                print(f"✅ BlogPost has featured_image field")
                 
                 # Upload the test file
                 with open(file_to_upload, 'rb') as f:
-                    filename = f'test_s3_upload{file_extension}'
+                    filename = f'test_s3_upload_{os.path.basename(file_to_upload)}'
                     post.featured_image.save(filename, ContentFile(f.read()))
                 
                 print(f"✅ Uploaded file to S3")
@@ -109,13 +112,16 @@ class Command(BaseCommand):
                 import requests
                 try:
                     response = requests.head(post.featured_image.url, timeout=5)
-                    print(f"✅ Image URL accessible: HTTP {response.status_code}")
+                    print(f"✅ Image URL test: HTTP {response.status_code}")
+                    
+                    if response.status_code == 200:
+                        print("🎉 SUCCESS! Image is publicly accessible via URL!")
+                    else:
+                        print(f"⚠️  URL returns {response.status_code}")
+                        
                 except Exception as e:
                     print(f"⚠️  Could not verify URL access: {e}")
             else:
-                # If no featured_image field, create post without it
-                post = BlogPost.objects.create(**post_data)
-                print(f"✅ Created test blog post (no featured_image field): {post.title}")
                 print("ℹ️  BlogPost model doesn't have featured_image field")
             
             # Clean up temporary file
@@ -133,3 +139,5 @@ class Command(BaseCommand):
             # Clean up on error
             if 'file_to_upload' in locals() and os.path.exists(file_to_upload):
                 os.unlink(file_to_upload)
+
+                

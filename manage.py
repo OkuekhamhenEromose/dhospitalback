@@ -3,6 +3,8 @@
 import os
 import sys
 
+# EARLY PATCH - Must be first
+import api.early_init  # This patches default_storage BEFORE Django loads
 
 def main():
     """Run administrative tasks."""
@@ -16,7 +18,6 @@ def main():
             "forget to activate a virtual environment?"
         ) from exc
     execute_from_command_line(sys.argv)
-
 
 if __name__ == '__main__':
     main()
