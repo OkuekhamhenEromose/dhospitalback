@@ -283,6 +283,7 @@ SOCIAL_AUTH_LOGIN_ERROR_URL = 'https://ettahospitalclone.vercel.app/auth/error'
 SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = config('SOCIAL_AUTH_GOOGLE_OAUTH2_KEY', default='')
 SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = config('SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET', default='')
 SOCIAL_AUTH_GOOGLE_OAUTH2_SCOPE = ['email', 'profile']
+SOCIAL_AUTH_GOOGLE_OAUTH2_REDIRECT_URI = 'https://dhospitalback.onrender.com/auth/complete/google-oauth2/'
 
 # JWT settings for social auth
 SOCIAL_AUTH_STRATEGY = 'social_django.strategy.DjangoStrategy'
