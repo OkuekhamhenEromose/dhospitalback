@@ -1,4 +1,4 @@
-# users/views.py - COMPLETE UPDATED VERSION
+# users/views.py - COMPLETE FIXED VERSION WITH ALL IMPORTS
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
@@ -9,18 +9,18 @@ from django.core.cache import cache
 from django.db import transaction
 from django.conf import settings
 from decouple import config
+from django.shortcuts import redirect  # CRITICAL: Add this import at the top
+import urllib.parse
+import requests
+import logging
+
 from .serializers import (
     RegistrationSerializer,
     ProfileSerializer,
     UpdateProfileSerializer
 )
 from .models import Profile
-import logging
-from django.shortcuts import redirect
-import urllib.parse
-import requests
-from django.urls import reverse
-from social_django.models import UserSocialAuth  # Added import
+from social_django.models import UserSocialAuth  # Add this import
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,6 @@ class RegistrationView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-# UPDATED: LoginView with email support
 class LoginView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -230,14 +229,10 @@ class UpdateProfileView(APIView):
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# UPDATED: SocialAuthSuccessView with improved token handling
 class SocialAuthSuccessView(APIView):
     permission_classes = [permissions.AllowAny]
     
     def get(self, request):
-        # Generate JWT tokens for the authenticated user
-        from rest_framework_simplejwt.tokens import RefreshToken
-        
         if request.user.is_authenticated:
             user = request.user
             
@@ -286,13 +281,11 @@ class SocialAuthSuccessView(APIView):
             
             logger.info(f"Redirecting to frontend: {redirect_url}")
             
-            from django.shortcuts import redirect
             return redirect(redirect_url)
         
         # If not authenticated, redirect to login
         return redirect('/login/?error=social_auth_failed')
 
-# UPDATED: SocialAuthErrorView with better error handling
 class SocialAuthErrorView(APIView):
     permission_classes = [permissions.AllowAny]
     
@@ -305,10 +298,8 @@ class SocialAuthErrorView(APIView):
         frontend_url = "https://ettahospitalclone.vercel.app"
         error_url = f"{frontend_url}/auth/error?message={urllib.parse.quote(message)}"
         
-        from django.shortcuts import redirect
         return redirect(error_url)
 
-# UPDATED: SocialAuthLoginView - simplified for Google only
 class SocialAuthLoginView(APIView):
     permission_classes = [permissions.AllowAny]
     
@@ -443,7 +434,6 @@ class SocialAuthLoginView(APIView):
         
         return username
 
-# Keep this view for providing social auth URLs
 class SocialAuthUrlsView(APIView):
     permission_classes = [permissions.AllowAny]
     
