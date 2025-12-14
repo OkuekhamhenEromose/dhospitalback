@@ -14,6 +14,8 @@ import urllib.parse
 import requests
 import logging
 from django.contrib.auth import login as auth_login
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 
 from .serializers import (
     RegistrationSerializer,
@@ -233,25 +235,37 @@ class UpdateProfileView(APIView):
 # In users/views.py - Update SocialAuthSuccessView
 from django.contrib.auth import login as auth_login  # Add this import
 
+@method_decorator(csrf_exempt, name='dispatch')
 class SocialAuthSuccessView(APIView):
     permission_classes = [permissions.AllowAny]
     
     def get(self, request):
-        logger.info(f"SocialAuthSuccessView called - User: {request.user}, Authenticated: {request.user.is_authenticated}")
+        logger.info(f"=== SOCIAL AUTH SUCCESS VIEW ===")
+        logger.info(f"User: {request.user}")
+        logger.info(f"Authenticated: {request.user.is_authenticated}")
+        logger.info(f"Session key: {request.session.session_key}")
+        logger.info(f"Session data: {dict(request.session)}")
+        
+        # Check if there's a social auth user in the session
+        social_user_id = request.session.get('social_auth_last_login_backend')
+        logger.info(f"Social auth in session: {social_user_id}")
+        
+        # Try to force authentication
+        if not request.user.is_authenticated:
+            # Check for recently authenticated user in session
+            user_id = request.session.get('_auth_user_id')
+            if user_id:
+                try:
+                    user = User.objects.get(id=user_id)
+                    # Manually log the user in
+                    auth_login(request, user)
+                    logger.info(f"Manually logged in user: {user.email}")
+                except User.DoesNotExist:
+                    logger.error(f"User with id {user_id} not found")
         
         if request.user.is_authenticated:
             user = request.user
-            
-            # MANUALLY LOGIN THE USER - THIS IS CRITICAL!
-            # This ensures the user has a proper Django session
-            auth_login(request, user)
-            
-            # Check if this is a social auth user
-            try:
-                social_auth = UserSocialAuth.objects.get(user=user, provider='google')
-                logger.info(f"Social auth found for {user.email}")
-            except UserSocialAuth.DoesNotExist:
-                logger.warning(f"No social auth found for {user.email}")
+            logger.info(f"✅ User {user.email} is authenticated!")
             
             # Generate JWT tokens
             refresh = RefreshToken.for_user(user)
@@ -259,13 +273,14 @@ class SocialAuthSuccessView(APIView):
             # Get or create profile
             profile, created = Profile.objects.get_or_create(user=user)
             
-            # If new profile or missing info, update from Google
-            if created or not profile.fullname:
+            # Update profile with Google data if new
+            if created:
                 try:
                     social_auth = UserSocialAuth.objects.get(user=user, provider='google')
                     if social_auth.extra_data.get('name'):
                         profile.fullname = social_auth.extra_data.get('name')
                         profile.save()
+                        logger.info(f"Updated profile for {user.email}")
                 except UserSocialAuth.DoesNotExist:
                     pass
             
@@ -278,10 +293,9 @@ class SocialAuthSuccessView(APIView):
                 'gender': profile.gender,
             }
             
-            # Redirect to frontend with tokens in URL
+            # Create redirect URL with tokens
             frontend_url = "https://ettahospitalclone.vercel.app"
             
-            # Create URL with tokens
             tokens = urllib.parse.urlencode({
                 'access': str(refresh.access_token),
                 'refresh': str(refresh),
@@ -293,13 +307,21 @@ class SocialAuthSuccessView(APIView):
             
             redirect_url = f"{frontend_url}/auth/callback?{tokens}"
             
-            logger.info(f"Google OAuth successful! Redirecting {user.email} to dashboard")
+            logger.info(f"✅ Success! Redirecting {user.email} to dashboard")
+            logger.info(f"Redirect URL: {redirect_url}")
+            
             return redirect(redirect_url)
-        
-        # If not authenticated, show debug info and redirect
-        logger.error(f"User NOT authenticated in SocialAuthSuccessView. Session: {dict(request.session)}")
-        frontend_url = "https://ettahospitalclone.vercel.app"
-        return redirect(f"{frontend_url}/login?error=social_auth_failed&reason=not_authenticated")
+        else:
+            # Debug: list all users with social auth
+            logger.error("❌ User is NOT authenticated")
+            social_users = UserSocialAuth.objects.all()
+            logger.error(f"Total social auth users: {social_users.count()}")
+            for su in social_users:
+                logger.error(f"  - {su.user.email} ({su.provider})")
+            
+            # Redirect to frontend with error
+            frontend_url = "https://ettahospitalclone.vercel.app"
+            return redirect(f"{frontend_url}/login?error=social_auth_failed&debug=not_logged_in")
 
 class SocialAuthErrorView(APIView):
     permission_classes = [permissions.AllowAny]
