@@ -232,9 +232,7 @@ class UpdateProfileView(APIView):
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# In users/views.py - Update SocialAuthSuccessView
-from django.contrib.auth import login as auth_login  # Add this import
-
+# In users/views.py - REPLACE the SocialAuthSuccessView with this FIXED version
 @method_decorator(csrf_exempt, name='dispatch')
 class SocialAuthSuccessView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -250,22 +248,41 @@ class SocialAuthSuccessView(APIView):
         social_user_id = request.session.get('social_auth_last_login_backend')
         logger.info(f"Social auth in session: {social_user_id}")
         
-        # Try to force authentication
+        # Try to find the authenticated user
+        user = None
+        
         if not request.user.is_authenticated:
             # Check for recently authenticated user in session
             user_id = request.session.get('_auth_user_id')
             if user_id:
                 try:
                     user = User.objects.get(id=user_id)
-                    # Manually log the user in
-                    auth_login(request, user)
-                    logger.info(f"Manually logged in user: {user.email}")
+                    logger.info(f"Found user in session: {user.email}")
                 except User.DoesNotExist:
                     logger.error(f"User with id {user_id} not found")
         
-        if request.user.is_authenticated:
-            user = request.user
-            logger.info(f"✅ User {user.email} is authenticated!")
+        # If still no user, check if this is a social auth callback
+        if not user:
+            # Check for social auth user
+            try:
+                # Social auth stores user id in 'social_auth_user_id'
+                social_user_id = request.session.get('social_auth_user_id')
+                if social_user_id:
+                    user = User.objects.get(id=social_user_id)
+                    logger.info(f"Found social auth user: {user.email}")
+            except (User.DoesNotExist, KeyError):
+                pass
+        
+        if user:
+            # IMPORTANT: Specify the backend when logging in
+            # Use the social auth backend
+            from django.conf import settings
+            backend = 'social_core.backends.google.GoogleOAuth2'
+            
+            # Manually log the user in with the correct backend
+            user.backend = backend  # Set the backend attribute on the user
+            auth_login(request, user)
+            logger.info(f"✅ Successfully logged in user: {user.email} using backend: {backend}")
             
             # Generate JWT tokens
             refresh = RefreshToken.for_user(user)
@@ -313,15 +330,25 @@ class SocialAuthSuccessView(APIView):
             return redirect(redirect_url)
         else:
             # Debug: list all users with social auth
-            logger.error("❌ User is NOT authenticated")
+            logger.error("❌ Could not find authenticated user")
             social_users = UserSocialAuth.objects.all()
             logger.error(f"Total social auth users: {social_users.count()}")
             for su in social_users:
                 logger.error(f"  - {su.user.email} ({su.provider})")
             
+            # Show debug info
+            debug_info = {
+                'session_keys': list(request.session.keys()),
+                'user_id_in_session': request.session.get('_auth_user_id'),
+                'social_auth_user_id': request.session.get('social_auth_user_id'),
+                'social_auth_last_login_backend': request.session.get('social_auth_last_login_backend'),
+            }
+            logger.error(f"Debug info: {debug_info}")
+            
             # Redirect to frontend with error
             frontend_url = "https://ettahospitalclone.vercel.app"
-            return redirect(f"{frontend_url}/login?error=social_auth_failed&debug=not_logged_in")
+            return redirect(f"{frontend_url}/login?error=social_auth_failed&debug=no_user_found")
+
 
 class SocialAuthErrorView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -510,3 +537,143 @@ class SocialAuthDebugView(APIView):
                 response_data['social_auth_error'] = str(e)
         
         return Response(response_data)
+    
+# In users/views.py - ADD this view
+class GoogleOAuthCallbackView(APIView):
+    """Direct Google OAuth2 callback handler - bypasses social-auth-app-django"""
+    permission_classes = [permissions.AllowAny]
+    
+    def get(self, request):
+        code = request.GET.get('code')
+        state = request.GET.get('state')
+        
+        if not code:
+            logger.error("No authorization code from Google")
+            frontend_url = "https://ettahospitalclone.vercel.app"
+            return redirect(f"{frontend_url}/login?error=no_auth_code")
+        
+        try:
+            # Exchange code for tokens
+            token_url = "https://oauth2.googleapis.com/token"
+            token_data = {
+                'code': code,
+                'client_id': settings.SOCIAL_AUTH_GOOGLE_OAUTH2_KEY,
+                'client_secret': settings.SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET,
+                'redirect_uri': 'https://dhospitalback.onrender.com/api/users/google-callback/',
+                'grant_type': 'authorization_code',
+            }
+            
+            token_response = requests.post(token_url, data=token_data)
+            token_response.raise_for_status()
+            token_json = token_response.json()
+            
+            access_token = token_json.get('access_token')
+            id_token = token_json.get('id_token')
+            
+            if not access_token:
+                logger.error("No access token from Google")
+                frontend_url = "https://ettahospitalclone.vercel.app"
+                return redirect(f"{frontend_url}/login?error=no_access_token")
+            
+            # Get user info from Google
+            userinfo_response = requests.get(
+                'https://www.googleapis.com/oauth2/v3/userinfo',
+                headers={'Authorization': f'Bearer {access_token}'}
+            )
+            userinfo_response.raise_for_status()
+            google_user = userinfo_response.json()
+            
+            email = google_user.get('email')
+            if not email:
+                logger.error("No email from Google")
+                frontend_url = "https://ettahospitalclone.vercel.app"
+                return redirect(f"{frontend_url}/login?error=no_email")
+            
+            # Find or create user
+            try:
+                user = User.objects.get(email=email)
+                created = False
+                logger.info(f"Existing user found: {email}")
+            except User.DoesNotExist:
+                # Create new user
+                username = self.generate_username(google_user.get('name', ''), email)
+                user = User.objects.create_user(
+                    username=username,
+                    email=email,
+                    password=None  # No password for Google users
+                )
+                user.first_name = google_user.get('given_name', '')
+                user.last_name = google_user.get('family_name', '')
+                user.save()
+                created = True
+                logger.info(f"New user created: {email}")
+                
+                # Create profile
+                profile, _ = Profile.objects.get_or_create(user=user)
+                profile.fullname = google_user.get('name', f"{user.first_name} {user.last_name}".strip())
+                profile.save()
+            
+            # Log the user in with the ModelBackend
+            from django.contrib.auth import login as auth_login
+            user.backend = 'django.contrib.auth.backends.ModelBackend'
+            auth_login(request, user)
+            
+            # Generate JWT tokens
+            refresh = RefreshToken.for_user(user)
+            
+            # Get profile data
+            try:
+                profile = Profile.objects.get(user=user)
+                profile_data = {
+                    'role': profile.role,
+                    'fullname': profile.fullname,
+                    'profile_pix': profile.profile_pix.url if profile.profile_pix else None,
+                    'phone': profile.phone,
+                    'gender': profile.gender,
+                }
+            except Profile.DoesNotExist:
+                profile_data = {
+                    'role': 'PATIENT',
+                    'fullname': user.get_full_name() or user.username,
+                    'profile_pix': None,
+                    'phone': None,
+                    'gender': None,
+                }
+            
+            # Redirect to frontend with tokens
+            frontend_url = "https://ettahospitalclone.vercel.app"
+            
+            tokens = urllib.parse.urlencode({
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+                'user_id': str(user.id),
+                'email': user.email,
+                'username': user.username,
+                'is_new_user': str(created).lower(),
+            })
+            
+            redirect_url = f"{frontend_url}/auth/callback?{tokens}"
+            
+            logger.info(f"Google direct auth successful for {email}")
+            return redirect(redirect_url)
+            
+        except requests.RequestException as e:
+            logger.error(f"Google API error: {str(e)}")
+            frontend_url = "https://ettahospitalclone.vercel.app"
+            return redirect(f"{frontend_url}/login?error=google_api_error&message={urllib.parse.quote(str(e))}")
+        except Exception as e:
+            logger.error(f"Unexpected error in Google auth: {str(e)}")
+            frontend_url = "https://ettahospitalclone.vercel.app"
+            return redirect(f"{frontend_url}/login?error=auth_failed&message={urllib.parse.quote(str(e))}")
+    
+    def generate_username(self, name, email):
+        """Generate unique username from name and email"""
+        base_username = name.replace(' ', '_').lower() if name else email.split('@')[0]
+        username = base_username
+        counter = 1
+        
+        while User.objects.filter(username=username).exists():
+            username = f"{base_username}_{counter}"
+            counter += 1
+        
+        return username

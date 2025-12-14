@@ -29,4 +29,5 @@ urlpatterns = [
     path('social-login/', views.SocialAuthLoginView.as_view(), name='social-login'),
     path('social-auth-urls/', views.SocialAuthUrlsView.as_view(), name='social-auth-urls'),
     path('social-auth-debug/', views.SocialAuthDebugView.as_view(), name='social-auth-debug'),
+    path('google-callback/', views.GoogleOAuthCallbackView.as_view(), name='google-callback'),
 ]
