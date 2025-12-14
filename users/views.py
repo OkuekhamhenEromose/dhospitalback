@@ -110,7 +110,7 @@ class UnifiedLoginView(APIView):
                 'code': auth_code,
                 'client_id': settings.SOCIAL_AUTH_GOOGLE_OAUTH2_KEY,
                 'client_secret': settings.SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET,
-                'redirect_uri': 'https://dhospitalback.onrender.com/api/users/login/',  # Same as regular login
+                'redirect_uri': 'https://ettahospitalclone.vercel.app/auth/callback',  # Same as regular login
                 'grant_type': 'authorization_code',
             }
             
