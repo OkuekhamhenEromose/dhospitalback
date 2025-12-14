@@ -62,6 +62,8 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'social_django.context_processors.backends',
+                'social_django.context_processors.login_redirect',
             ],
         },
     },
@@ -93,9 +95,6 @@ else:
         'LOCATION': 'unique-snowflake',
     }
 
-# Add database connection pooling (if using PostgreSQL)
-# settings.py - Replace the DATABASES section
-
 # Default to SQLite for local development
 DATABASES = {
     'default': {
@@ -106,8 +105,6 @@ DATABASES = {
 
 # Override with PostgreSQL if DATABASE_URL exists (Render will provide this)
 DATABASE_URL = config('DATABASE_URL', default=None)
-# Add to settings.py - Gunicorn timeout settings
-# This helps prevent the WORKER TIMEOUT issue
 GUNICORN_TIMEOUT = 120  # 2 minutes for slower operations
 
 # Database connection timeout
@@ -135,10 +132,10 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-# CORS / CSRF
+# ==================== CORS / CSRF - FIXED ==================== #
 CORS_ALLOW_ALL_ORIGINS = config('CORS_ALLOW_ALL_ORIGINS', default=DEBUG, cast=bool)
 CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:5173,http://localhost:3000', cast=Csv())
-# Add these to handle preflight requests
+
 CORS_ALLOW_METHODS = [
     "DELETE",
     "GET",
@@ -161,9 +158,9 @@ CORS_ALLOW_HEADERS = [
 ]
 
 CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', default='http://localhost:5173,http://localhost:5174', cast=Csv())
-CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_CREDENTIALS = True  # CRITICAL for social auth cookies
 
-# AWS S3 Configuration
+# ==================== AWS S3 Configuration ==================== #
 AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default='')
 AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default='')
 AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME', default='etha-hospital')
@@ -196,7 +193,7 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 # Use Whitenoise for static files
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
-# Email
+# ==================== EMAIL ==================== #
 EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
 EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
 EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
@@ -204,12 +201,10 @@ EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
 EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 
-# DRF + JWT
-# Add these performance optimizations
+# ==================== DRF + JWT ==================== #
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
-        'social_core.backends.google.GoogleOAuth2',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.AllowAny',
@@ -223,7 +218,6 @@ REST_FRAMEWORK = {
     ),
 }
 
-# settings.py - JWT Configuration
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(hours=24),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
@@ -254,14 +248,51 @@ SIMPLE_JWT = {
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-
-# Add these social auth configurations at the end of settings.py
+# ==================== SOCIAL AUTH FIXES - UPDATED ==================== #
+# Fix authentication backends - ORDER MATTERS!
 AUTHENTICATION_BACKENDS = (
     'social_core.backends.google.GoogleOAuth2',
     'django.contrib.auth.backends.ModelBackend',
 )
 
-# Social Auth Pipeline (simplified for Google only)
+# SOCIAL AUTH CONFIGURATION
+SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = config('SOCIAL_AUTH_GOOGLE_OAUTH2_KEY', default='')
+SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = config('SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET', default='')
+
+# Set the proper redirect URI - CRITICAL FIX
+SOCIAL_AUTH_GOOGLE_OAUTH2_REDIRECT_URI = 'https://dhospitalback.onrender.com/complete/google-oauth2/'
+if DEBUG:
+    SOCIAL_AUTH_GOOGLE_OAUTH2_REDIRECT_URI = 'http://localhost:8000/complete/google-oauth2/'
+
+# Important configurations
+SOCIAL_AUTH_GOOGLE_OAUTH2_SCOPE = [
+    'https://www.googleapis.com/auth/userinfo.email',
+    'https://www.googleapis.com/auth/userinfo.profile',
+    'openid'
+]
+
+SOCIAL_AUTH_GOOGLE_OAUTH2_AUTH_EXTRA_ARGUMENTS = {
+    'access_type': 'online',
+    'prompt': 'select_account consent',
+}
+
+# Social Auth URLs - FIXED
+SOCIAL_AUTH_LOGIN_REDIRECT_URL = '/api/users/social-auth-success/'
+SOCIAL_AUTH_LOGIN_ERROR_URL = '/api/users/social-auth-error/'
+SOCIAL_AUTH_NEW_USER_REDIRECT_URL = '/api/users/social-auth-success/'
+SOCIAL_AUTH_NEW_ASSOCIATION_REDIRECT_URL = '/api/users/social-auth-success/'
+
+# Enable session persistence
+SOCIAL_AUTH_SESSION_EXPIRATION = False
+SOCIAL_AUTH_JSONFIELD_ENABLED = True
+
+# User model configuration
+SOCIAL_AUTH_USER_MODEL = 'auth.User'
+SOCIAL_AUTH_USERNAME_IS_FULL_EMAIL = True
+SOCIAL_AUTH_PROTECTED_USER_FIELDS = ['email', 'username']
+SOCIAL_AUTH_CLEAN_USERNAME_FUNCTION = 'social_core.utils.clean_username'
+
+# FIXED Social Auth Pipeline - THIS IS CRITICAL
 SOCIAL_AUTH_PIPELINE = (
     'social_core.pipeline.social_auth.social_details',
     'social_core.pipeline.social_auth.social_uid',
@@ -275,47 +306,51 @@ SOCIAL_AUTH_PIPELINE = (
     'users.pipeline.create_profile',  # Custom pipeline to create profile
 )
 
-# Social Auth URLs
-SOCIAL_AUTH_LOGIN_REDIRECT_URL = 'https://ettahospitalclone.vercel.app/auth/callback'
-SOCIAL_AUTH_LOGIN_ERROR_URL = 'https://ettahospitalclone.vercel.app/auth/error'
+# ==================== SESSION & COOKIE SETTINGS - CRITICAL FOR SOCIAL AUTH ==================== #
+# Session settings
+SESSION_ENGINE = 'django.contrib.sessions.backends.db'
+SESSION_COOKIE_NAME = 'sessionid'
+SESSION_COOKIE_AGE = 1209600  # 2 weeks
+SESSION_SAVE_EVERY_REQUEST = False
+SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 
-# Google OAuth2 (KEEP ONLY THIS)
-SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = config('SOCIAL_AUTH_GOOGLE_OAUTH2_KEY', default='')
-SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = config('SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET', default='')
-SOCIAL_AUTH_GOOGLE_OAUTH2_SCOPE = ['email', 'profile']
-SOCIAL_AUTH_GOOGLE_OAUTH2_REDIRECT_URI = 'https://dhospitalback.onrender.com/complete/google-oauth2/'
+# Cookie settings for production
+if not DEBUG:
+    # Production settings
+    SESSION_COOKIE_SECURE = True
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = 'None'  # Required for cross-site Google OAuth
+    CSRF_COOKIE_SECURE = True
+    CSRF_COOKIE_SAMESITE = 'None'
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = 31536000  # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+else:
+    # Development settings
+    SESSION_COOKIE_SECURE = False
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = 'Lax'
+    CSRF_COOKIE_SECURE = False
+    CSRF_COOKIE_SAMESITE = 'Lax'
 
-# For development
-if DEBUG:
-    SOCIAL_AUTH_GOOGLE_OAUTH2_REDIRECT_URI = 'http://localhost:8000/complete/google-oauth2/'
+# CORS settings for social auth
+CORS_EXPOSE_HEADERS = ['Content-Type', 'X-CSRFToken']
+CORS_ALLOW_CREDENTIALS = True
 
-# Fix redirect URLs
-LOGIN_URL = '/login/'
+# ==================== LOGIN URLS ==================== #
+LOGIN_URL = '/admin/login/'  # Fallback login URL
 LOGIN_REDIRECT_URL = '/api/users/dashboard/'
-SOCIAL_AUTH_LOGIN_REDIRECT_URL = '/api/users/social-auth-success/'
-SOCIAL_AUTH_LOGIN_ERROR_URL = '/api/users/social-auth-error/'
+LOGOUT_REDIRECT_URL = '/'
 
-# Important: This allows email-based login
-SOCIAL_AUTH_USERNAME_IS_FULL_EMAIL = True
-SOCIAL_AUTH_PROTECTED_USER_FIELDS = ['email', 'username']
-
-# Ensure email is collected
-SOCIAL_AUTH_GOOGLE_OAUTH2_AUTH_EXTRA_ARGUMENTS = {
-    'access_type': 'online',
-    'prompt': 'select_account consent',
-}
-
-# JWT settings for social auth
+# ==================== SOCIAL AUTH STRATEGY ==================== #
 SOCIAL_AUTH_STRATEGY = 'social_django.strategy.DjangoStrategy'
 SOCIAL_AUTH_STORAGE = 'social_django.models.DjangoStorage'
 
 # ==================== FORCE STORAGE INITIALIZATION ==================== #
-# Add this at the VERY END of settings.py
-
 import django.core.files.storage as storage_module
 
 # Force the LazyObject to initialize NOW with correct settings
-# This triggers the LazyObject to load the actual storage class
 try:
     _ = storage_module.default_storage._wrapped
 except:

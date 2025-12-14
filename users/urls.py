@@ -28,4 +28,5 @@ urlpatterns = [
     path('social-auth-error/', views.SocialAuthErrorView.as_view(), name='social-auth-error'),
     path('social-login/', views.SocialAuthLoginView.as_view(), name='social-login'),
     path('social-auth-urls/', views.SocialAuthUrlsView.as_view(), name='social-auth-urls'),
+    path('social-auth-debug/', views.SocialAuthDebugView.as_view(), name='social-auth-debug'),
 ]

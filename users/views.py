@@ -233,6 +233,9 @@ class SocialAuthSuccessView(APIView):
     permission_classes = [permissions.AllowAny]
     
     def get(self, request):
+        logger.info(f"SocialAuthSuccessView called - User: {request.user}, Authenticated: {request.user.is_authenticated}")
+        logger.info(f"Session data: {dict(request.session)}")
+        
         if request.user.is_authenticated:
             user = request.user
             
@@ -283,8 +286,10 @@ class SocialAuthSuccessView(APIView):
             
             return redirect(redirect_url)
         
-        # If not authenticated, redirect to login
-        return redirect('/login/?error=social_auth_failed')
+        # If not authenticated, redirect to frontend login page
+        frontend_url = "https://ettahospitalclone.vercel.app"
+        return redirect(f"{frontend_url}/login?error=social_auth_failed")
+
 
 class SocialAuthErrorView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -444,3 +449,32 @@ class SocialAuthUrlsView(APIView):
         return Response({
             'google': f"{base_url}/api/users/login/google-oauth2/"
         })
+    
+class SocialAuthDebugView(APIView):
+    permission_classes = [permissions.AllowAny]
+    
+    def get(self, request):
+        """Debug view to see what's happening in social auth"""
+        response_data = {
+            'user': {
+                'is_authenticated': request.user.is_authenticated,
+                'username': request.user.username if request.user.is_authenticated else 'Anonymous',
+                'email': request.user.email if request.user.is_authenticated else None,
+            },
+            'session_keys': list(request.session.keys()),
+            'social_auth_data': None,
+        }
+        
+        if request.user.is_authenticated:
+            try:
+                social_auth = UserSocialAuth.objects.filter(user=request.user).first()
+                if social_auth:
+                    response_data['social_auth_data'] = {
+                        'provider': social_auth.provider,
+                        'uid': social_auth.uid,
+                        'extra_data': social_auth.extra_data,
+                    }
+            except Exception as e:
+                response_data['social_auth_error'] = str(e)
+        
+        return Response(response_data)
