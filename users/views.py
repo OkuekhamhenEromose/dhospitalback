@@ -27,6 +27,220 @@ from social_django.models import UserSocialAuth  # Add this import
 
 logger = logging.getLogger(__name__)
 
+# In users/views.py - ADD this view at the top
+class UnifiedLoginView(APIView):
+    """Handle both regular login and Google OAuth login"""
+    permission_classes = [permissions.AllowAny]
+    
+    def post(self, request):
+        # Check if this is a Google OAuth request
+        google_auth_code = request.data.get('google_auth_code')
+        
+        if google_auth_code:
+            # Handle Google OAuth login
+            return self.handle_google_login(request, google_auth_code)
+        else:
+            # Handle regular email/password login
+            return self.handle_regular_login(request)
+    
+    def handle_regular_login(self, request):
+        identifier = request.data.get('username')  # Can be username OR email
+        password = request.data.get('password')
+        
+        if not identifier or not password:
+            return Response(
+                {'detail': 'Username/Email and password are required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Try to authenticate with username first
+        user = authenticate(username=identifier, password=password)
+        
+        if user is None:
+            # Try with email
+            try:
+                user_obj = User.objects.get(email=identifier)
+                user = authenticate(username=user_obj.username, password=password)
+            except User.DoesNotExist:
+                user = None
+        
+        if user is None:
+            return Response(
+                {'detail': 'Invalid credentials'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if not user.is_active:
+            return Response(
+                {'detail': 'Account is disabled'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Log the user in (for session-based auth if needed)
+        from django.contrib.auth import login as auth_login
+        user.backend = 'django.contrib.auth.backends.ModelBackend'
+        auth_login(request, user)
+        
+        # Generate JWT tokens
+        refresh = RefreshToken.for_user(user)
+        
+        # Get profile data
+        profile_data = self.get_user_profile_data(user, request)
+        
+        response_data = {
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'profile': profile_data
+            }
+        }
+        
+        logger.info(f"Regular login successful: {user.username}")
+        return Response(response_data, status=status.HTTP_200_OK)
+    
+    def handle_google_login(self, request, auth_code):
+        """Handle Google OAuth login with authorization code"""
+        try:
+            # Exchange code for tokens
+            token_url = "https://oauth2.googleapis.com/token"
+            token_data = {
+                'code': auth_code,
+                'client_id': settings.SOCIAL_AUTH_GOOGLE_OAUTH2_KEY,
+                'client_secret': settings.SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET,
+                'redirect_uri': 'https://dhospitalback.onrender.com/api/users/login/',  # Same as regular login
+                'grant_type': 'authorization_code',
+            }
+            
+            token_response = requests.post(token_url, data=token_data)
+            token_response.raise_for_status()
+            token_json = token_response.json()
+            
+            access_token = token_json.get('access_token')
+            
+            if not access_token:
+                return Response(
+                    {'detail': 'Failed to get access token from Google'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Get user info from Google
+            userinfo_response = requests.get(
+                'https://www.googleapis.com/oauth2/v3/userinfo',
+                headers={'Authorization': f'Bearer {access_token}'}
+            )
+            userinfo_response.raise_for_status()
+            google_user = userinfo_response.json()
+            
+            email = google_user.get('email')
+            if not email:
+                return Response(
+                    {'detail': 'No email received from Google'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Find or create user
+            try:
+                user = User.objects.get(email=email)
+                created = False
+                logger.info(f"Google login - Existing user: {email}")
+            except User.DoesNotExist:
+                # Create new user
+                username = self.generate_username(google_user.get('name', ''), email)
+                user = User.objects.create_user(
+                    username=username,
+                    email=email,
+                    password=None  # No password for Google users
+                )
+                user.first_name = google_user.get('given_name', '')
+                user.last_name = google_user.get('family_name', '')
+                user.save()
+                created = True
+                logger.info(f"Google login - New user created: {email}")
+                
+                # Create profile
+                profile, _ = Profile.objects.get_or_create(user=user)
+                profile.fullname = google_user.get('name', f"{user.first_name} {user.last_name}".strip())
+                profile.save()
+            
+            # Log the user in (for session-based auth if needed)
+            from django.contrib.auth import login as auth_login
+            user.backend = 'django.contrib.auth.backends.ModelBackend'
+            auth_login(request, user)
+            
+            # Generate JWT tokens
+            refresh = RefreshToken.for_user(user)
+            
+            # Get profile data
+            profile_data = self.get_user_profile_data(user, request)
+            
+            response_data = {
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+                'user': {
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email,
+                    'profile': profile_data
+                },
+                'is_new_user': created
+            }
+            
+            logger.info(f"Google login successful: {user.email}")
+            return Response(response_data, status=status.HTTP_200_OK)
+            
+        except requests.RequestException as e:
+            logger.error(f"Google API error: {str(e)}")
+            return Response(
+                {'detail': 'Google authentication failed'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in Google login: {str(e)}")
+            return Response(
+                {'detail': 'Authentication failed'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def get_user_profile_data(self, user, request):
+        """Get profile data for any user"""
+        try:
+            profile = Profile.objects.select_related('user').get(user=user)
+            profile_serializer = ProfileSerializer(
+                profile, 
+                context={'request': request}
+            )
+            return {
+                'role': profile.role,
+                'fullname': profile.fullname,
+                'profile_pix': profile_serializer.data.get('profile_pix'),
+                'phone': profile.phone,
+                'gender': profile.gender,
+            }
+        except Profile.DoesNotExist:
+            logger.warning(f"Profile not found for user {user.id}")
+            return {
+                'role': 'PATIENT',
+                'fullname': user.get_full_name() or user.username,
+                'profile_pix': None,
+                'phone': None,
+                'gender': None,
+            }
+    
+    def generate_username(self, name, email):
+        """Generate unique username from name and email"""
+        base_username = name.replace(' ', '_').lower() if name else email.split('@')[0]
+        username = base_username
+        counter = 1
+        
+        while User.objects.filter(username=username).exists():
+            username = f"{base_username}_{counter}"
+            counter += 1
+        
+        return username
+
 class RegistrationView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -677,3 +891,4 @@ class GoogleOAuthCallbackView(APIView):
             counter += 1
         
         return username
+    
